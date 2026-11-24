@@ -46,7 +46,7 @@ keycloakClient:
 # Rendered as container env vars; string values are passed through `tpl`.
 envVars:
   RBAC_KEYCLOAK_URL: '{{ tpl .Values.global.keycloakBaseUrl $ }}'
-  RBAC_KEYCLOAK_ADMIN_REALM: master
+  RBAC_KEYCLOAK_ADMIN_REALM: staff
   RBAC_KEYCLOAK_CLIENT_ID: '{{ .Values.keycloakClient.clientId }}'
   RBAC_AUTH_REALM: staff
   RBAC_AUTH_CLIENT_ID: '{{ .Values.keycloakClient.clientId }}'

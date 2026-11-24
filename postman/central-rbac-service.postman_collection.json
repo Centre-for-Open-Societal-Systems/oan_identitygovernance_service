@@ -2,18 +2,18 @@
   "info": {
     "name": "central-rbac service (own routes)",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Run order: 0 Setup (Keycloak) -> start the service with RBAC_KEYCLOAK_CLIENT_SECRET={{rbac_client_secret}} -> 1 Service routes -> 2 Cleanup. Uses the kc_* variables of the Postman environment."
+    "description": "Start the service with the central-rbac client of the staff realm (login and service account), then run 0 Setup -> 1 Service routes -> 2 Cleanup. Needs kc_base_url, kc_realm, rbac_client_secret, op_username, op_password."
   },
   "item": [
     {
-      "name": "0. Setup: client, operator and permissions in Keycloak",
+      "name": "0. Setup: operator token",
       "item": [
         {
-          "name": "Admin token",
+          "name": "Operator token (direct login in the staff realm)",
           "request": {
             "method": "POST",
             "header": [],
-            "url": "{{kc_base_url}}/realms/{{kc_admin_realm}}/protocol/openid-connect/token",
+            "url": "{{kc_base_url}}/realms/{{kc_realm}}/protocol/openid-connect/token",
             "body": {
               "mode": "urlencoded",
               "urlencoded": [
@@ -23,15 +23,56 @@
                 },
                 {
                   "key": "client_id",
-                  "value": "{{kc_admin_client_id}}"
+                  "value": "central-rbac"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{rbac_client_secret}}"
                 },
                 {
                   "key": "username",
-                  "value": "{{kc_admin_user}}"
+                  "value": "{{op_username}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{kc_admin_password}}"
+                  "value": "{{op_password}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.environment.set('rbac_token', pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Service account token (client credentials)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{kc_base_url}}/realms/{{kc_realm}}/protocol/openid-connect/token",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "client_credentials"
+                },
+                {
+                  "key": "client_id",
+                  "value": "central-rbac"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{rbac_client_secret}}"
                 }
               ]
             }
@@ -50,39 +91,7 @@
           ]
         },
         {
-          "name": "Create client central-rbac",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{kc_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{kc_base_url}}/admin/realms/master/clients",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"clientId\": \"central-rbac\",\n  \"enabled\": true,\n  \"publicClient\": false,\n  \"serviceAccountsEnabled\": true,\n  \"directAccessGrantsEnabled\": true,\n  \"standardFlowEnabled\": true,\n  \"redirectUris\": [\n    \"http://localhost:8000/auth/callback\"\n  ]\n}"
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 201', () => pm.response.to.have.status(201));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Find client uuid",
+          "name": "Find the operator",
           "request": {
             "method": "GET",
             "header": [
@@ -91,146 +100,7 @@
                 "value": "Bearer {{kc_token}}"
               }
             ],
-            "url": "{{kc_base_url}}/admin/realms/master/clients?clientId=central-rbac"
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 200', () => pm.response.to.have.status(200));",
-                  "pm.environment.set('rbac_client_uuid', pm.response.json()[0].id);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Read client secret",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{kc_token}}"
-              }
-            ],
-            "url": "{{kc_base_url}}/admin/realms/master/clients/{{rbac_client_uuid}}/client-secret"
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 200', () => pm.response.to.have.status(200));",
-                  "pm.environment.set('rbac_client_secret', pm.response.json().value);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Create role rbac-admin",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{kc_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{kc_base_url}}/admin/realms/master/clients/{{rbac_client_uuid}}/roles",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"rbac-admin\"\n}"
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 201', () => pm.response.to.have.status(201));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Read role rbac-admin",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{kc_token}}"
-              }
-            ],
-            "url": "{{kc_base_url}}/admin/realms/master/clients/{{rbac_client_uuid}}/roles/rbac-admin"
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 200', () => pm.response.to.have.status(200));",
-                  "pm.environment.set('rbac_role_id', pm.response.json().id);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Create operator user",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{kc_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{kc_base_url}}/admin/realms/master/users",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"username\": \"rbac-newman-op\",\n  \"enabled\": true,\n  \"email\": \"rbac-newman-op@example.com\",\n  \"emailVerified\": true,\n  \"firstName\": \"Newman\",\n  \"lastName\": \"Operator\",\n  \"credentials\": [\n    {\n      \"type\": \"password\",\n      \"value\": \"{{new_user_password}}\",\n      \"temporary\": false\n    }\n  ]\n}"
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 201', () => pm.response.to.have.status(201));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Find operator id",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{kc_token}}"
-              }
-            ],
-            "url": "{{kc_base_url}}/admin/realms/master/users?username=rbac-newman-op&exact=true"
+            "url": "{{kc_base_url}}/admin/realms/{{kc_realm}}/users?username={{op_username}}&exact=true"
           },
           "event": [
             {
@@ -240,200 +110,6 @@
                 "exec": [
                   "pm.test('status 200', () => pm.response.to.have.status(200));",
                   "pm.environment.set('rbac_op_id', pm.response.json()[0].id);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Grant rbac-admin to operator",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{kc_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{kc_base_url}}/admin/realms/master/users/{{rbac_op_id}}/role-mappings/clients/{{rbac_client_uuid}}",
-            "body": {
-              "mode": "raw",
-              "raw": "[\n  {\n    \"id\": \"{{rbac_role_id}}\",\n    \"name\": \"rbac-admin\"\n  }\n]"
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 204', () => pm.response.to.have.status(204));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Service account user",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{kc_token}}"
-              }
-            ],
-            "url": "{{kc_base_url}}/admin/realms/master/clients/{{rbac_client_uuid}}/service-account-user"
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 200', () => pm.response.to.have.status(200));",
-                  "pm.environment.set('rbac_sa_id', pm.response.json().id);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Find staff-realm management client",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{kc_token}}"
-              }
-            ],
-            "url": "{{kc_base_url}}/admin/realms/master/clients?clientId={{kc_realm}}-realm"
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 200', () => pm.response.to.have.status(200));",
-                  "pm.environment.set('mgmt_client_uuid', pm.response.json()[0].id);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "List management roles",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{kc_token}}"
-              }
-            ],
-            "url": "{{kc_base_url}}/admin/realms/master/clients/{{mgmt_client_uuid}}/roles?max=100"
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 200', () => pm.response.to.have.status(200));",
-                  "const want=['manage-users','view-users','query-users','manage-clients','view-clients','query-clients','view-realm'];",
-                  "pm.environment.set('mgmt_roles', JSON.stringify(pm.response.json().filter(r=>want.includes(r.name)).map(r=>({id:r.id,name:r.name}))));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Grant management roles to service account",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{kc_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{kc_base_url}}/admin/realms/master/users/{{rbac_sa_id}}/role-mappings/clients/{{mgmt_client_uuid}}",
-            "body": {
-              "mode": "raw",
-              "raw": "[]"
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.request.body.raw = pm.environment.get('mgmt_roles');"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 204', () => pm.response.to.have.status(204));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Operator token (direct login)",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": "{{kc_base_url}}/realms/master/protocol/openid-connect/token",
-            "body": {
-              "mode": "urlencoded",
-              "urlencoded": [
-                {
-                  "key": "grant_type",
-                  "value": "password"
-                },
-                {
-                  "key": "client_id",
-                  "value": "central-rbac"
-                },
-                {
-                  "key": "client_secret",
-                  "value": "{{rbac_client_secret}}"
-                },
-                {
-                  "key": "username",
-                  "value": "rbac-newman-op"
-                },
-                {
-                  "key": "password",
-                  "value": "{{new_user_password}}"
-                }
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 200', () => pm.response.to.have.status(200));",
-                  "pm.environment.set('rbac_token', pm.response.json().access_token);"
                 ]
               }
             }
@@ -607,6 +283,61 @@
           ]
         },
         {
+          "name": "Operator was granted OAN Administrator on the new client",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kc_token}}"
+              }
+            ],
+            "url": "{{kc_base_url}}/admin/realms/{{kc_realm}}/users/{{rbac_op_id}}/role-mappings"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const m = pm.response.json().clientMappings || {};",
+                  "pm.test('OAN Administrator under newman-app', () => pm.expect(JSON.stringify((m['newman-app']||{}).mappings||[])).to.include('OAN Administrator'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "First sync imported the role",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{rbac_token}}"
+              }
+            ],
+            "url": "{{rbac_base_url}}/roles/list?application_id={{app_id}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('envelope ok', () => pm.expect(j.response_header.status).to.eql('SUCCESS'));",
+                  "const r = j.response_body.find(x => x.name === 'OAN Administrator');",
+                  "pm.test('imported', () => pm.expect(r && r.status).to.eql('imported'));",
+                  "pm.environment.set('rbac_role_id', r && r.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "List applications",
           "request": {
             "method": "GET",
@@ -743,7 +474,7 @@
             "url": "{{rbac_base_url}}/users/create",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"realm\": \"{{kc_realm}}\",\n  \"username\": \"newman.user\",\n  \"email\": \"newman.user@example.com\",\n  \"first_name\": \"Newman\",\n  \"last_name\": \"User\",\n  \"send_invite\": false\n}"
+              "raw": "{\n  \"realm\": \"{{kc_realm}}\",\n  \"username\": \"newman.user\",\n  \"email\": \"newman.user@example.com\",\n  \"first_name\": \"Newman\",\n  \"last_name\": \"User\",\n  \"send_invite\": false,\n  \"role_ids\": [\n    \"{{rbac_role_id}}\"\n  ]\n}"
             }
           },
           "event": [
@@ -808,7 +539,8 @@
                 "exec": [
                   "pm.test('status 200', () => pm.response.to.have.status(200));",
                   "const j = pm.response.json();",
-                  "pm.test('envelope ok', () => pm.expect(j.response_header.status).to.eql('SUCCESS'));"
+                  "pm.test('envelope ok', () => pm.expect(j.response_header.status).to.eql('SUCCESS'));",
+                  "pm.test('has the role', () => pm.expect(JSON.stringify(j.response_body)).to.include('OAN Administrator'));"
                 ]
               }
             }
@@ -921,32 +653,28 @@
       ]
     },
     {
-      "name": "2. Cleanup: remove everything the run created",
+      "name": "2. Cleanup: remove the application client and test user",
       "item": [
         {
-          "name": "Admin token",
+          "name": "Service account token (client credentials)",
           "request": {
             "method": "POST",
             "header": [],
-            "url": "{{kc_base_url}}/realms/{{kc_admin_realm}}/protocol/openid-connect/token",
+            "url": "{{kc_base_url}}/realms/{{kc_realm}}/protocol/openid-connect/token",
             "body": {
               "mode": "urlencoded",
               "urlencoded": [
                 {
                   "key": "grant_type",
-                  "value": "password"
+                  "value": "client_credentials"
                 },
                 {
                   "key": "client_id",
-                  "value": "{{kc_admin_client_id}}"
+                  "value": "central-rbac"
                 },
                 {
-                  "key": "username",
-                  "value": "{{kc_admin_user}}"
-                },
-                {
-                  "key": "password",
-                  "value": "{{kc_admin_password}}"
+                  "key": "client_secret",
+                  "value": "{{rbac_client_secret}}"
                 }
               ]
             }
@@ -1075,54 +803,6 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('deleted', () => pm.expect([204,404]).to.include(pm.response.code));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Delete operator user",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{kc_token}}"
-              }
-            ],
-            "url": "{{kc_base_url}}/admin/realms/master/users/{{rbac_op_id}}"
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 204', () => pm.response.to.have.status(204));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Delete client central-rbac",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{kc_token}}"
-              }
-            ],
-            "url": "{{kc_base_url}}/admin/realms/master/clients/{{rbac_client_uuid}}"
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 204', () => pm.response.to.have.status(204));"
                 ]
               }
             }
