@@ -17,6 +17,8 @@ class ServiceAdapter:
     DELETE {admin_api_url}/roles/{name}
     PUT    {admin_api_url}/roles/{name}/permissions   {permissions: [{resource, action}]}
     GET    {admin_api_url}/roles/{name}/permissions   -> {permissions: [...]}
+
+    Use as `async with ServiceAdapter(app) as svc:`.
     """
 
     def __init__(self, app: Application) -> None:
@@ -30,7 +32,13 @@ class ServiceAdapter:
             headers["Authorization"] = f"Bearer {token}"
         self._http = httpx.AsyncClient(base_url=app.admin_api_url.rstrip("/"), headers=headers, timeout=_config.http_timeout)
 
-    async def _call(self, method: str, path: str, **kw) -> dict:
+    async def __aenter__(self) -> "ServiceAdapter":
+        return self
+
+    async def __aexit__(self, *exc) -> None:
+        await self._http.aclose()
+
+    async def request(self, method: str, path: str, **kw) -> dict:
         try:
             r = await self._http.request(method, path, **kw)
         except httpx.HTTPError as e:
@@ -39,18 +47,5 @@ class ServiceAdapter:
             raise RbacError("SERVICE_ERROR", f"{method} {path} -> {r.status_code}: {r.text[:300]}", 502)
         return r.json() if r.content else {}
 
-    async def create_role(self, name: str, description: str | None) -> str | None:
-        data = await self._call("POST", "/roles", json={"name": name, "description": description})
-        return data.get("keycloak_role_id")
-
-    async def delete_role(self, name: str) -> None:
-        await self._call("DELETE", f"/roles/{name}")
-
-    async def set_permissions(self, name: str, permissions: list[dict]) -> None:
-        await self._call("PUT", f"/roles/{name}/permissions", json={"permissions": permissions})
-
     async def get_permissions(self, name: str) -> list[dict]:
-        return (await self._call("GET", f"/roles/{name}/permissions")).get("permissions", [])
-
-    async def aclose(self) -> None:
-        await self._http.aclose()
+        return (await self.request("GET", f"/roles/{name}/permissions")).get("permissions", [])

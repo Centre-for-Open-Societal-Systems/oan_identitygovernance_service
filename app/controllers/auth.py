@@ -12,14 +12,7 @@ import httpx
 from fastapi import Depends, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from app.auth import (
-    ACCESS_COOKIE,
-    REFRESH_COOKIE,
-    Principal,
-    current_principal,
-    decode,
-    realm_issuer,
-)
+from app.auth import ACCESS_COOKIE, DIRECT_ISSUER, REFRESH_COOKIE, Principal, current_principal
 from app.config import Settings
 from app.envelope import RbacError, ok
 from openg2p_fastapi_common.controller import BaseController
@@ -28,7 +21,7 @@ _config = Settings.get_config(strict=False)
 
 
 _OAUTH_COOKIE = "rbac_oauth"
-_oidc = f"{realm_issuer(_config.auth_realm)}/protocol/openid-connect"
+_oidc = f"{DIRECT_ISSUER}/protocol/openid-connect"
 _redirect_uri = f"{_config.public_url}/auth/callback"
 
 

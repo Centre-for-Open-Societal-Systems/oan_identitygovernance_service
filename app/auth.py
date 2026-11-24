@@ -26,11 +26,7 @@ CSRF_VALUE = "central-rbac"
 ADMIN, OPERATOR, VIEWER = "rbac-admin", "rbac-operator", "rbac-viewer"
 
 
-def realm_issuer(realm: str) -> str:
-    return f"{_config.keycloak_url}/realms/{realm}"
-
-
-DIRECT_ISSUER = realm_issuer(_config.auth_realm)
+DIRECT_ISSUER = f"{_config.keycloak_url}/realms/{_config.auth_realm}"
 
 # issuer -> (jwks client, accepted azp)
 _trusted: dict[str, tuple[jwt.PyJWKClient, str]] = {
@@ -51,28 +47,6 @@ class Principal:
     email: str | None = None
     name: str | None = None
     source: str = "bearer"
-
-
-def _extract(request: Request) -> tuple[str, str]:
-    scheme, _, bearer = request.headers.get("authorization", "").partition(" ")
-    if scheme.lower() == "bearer" and bearer:
-        return bearer, "bearer"
-    if tok := request.cookies.get(ACCESS_COOKIE):
-        return tok, "cookie"
-    if _config.iam_issuer and (tok := request.cookies.get(_config.iam_cookie_name)):
-        return tok, "iam_cookie"
-    raise RbacError("AUTH_REQUIRED", "Login required", 401)
-
-
-def _check_csrf(request: Request) -> None:
-    """Cookies are sent by the browser on its own, so writes need proof the call came from our frontend."""
-    if request.method in ("GET", "HEAD", "OPTIONS"):
-        return
-    if request.headers.get(CSRF_HEADER) != CSRF_VALUE:
-        raise RbacError("CSRF", f"Missing {CSRF_HEADER}: {CSRF_VALUE} header", 403)
-    origin = request.headers.get("origin")
-    if origin and origin not in _config.cors_allow_origins:
-        raise RbacError("CSRF", "Origin not allowed", 403)
 
 
 def decode(token: str) -> dict:
@@ -97,9 +71,22 @@ def decode(token: str) -> dict:
 
 
 async def current_principal(request: Request) -> Principal:
-    token, source = _extract(request)
-    if source != "bearer":
-        _check_csrf(request)
+    scheme, _, bearer = request.headers.get("authorization", "").partition(" ")
+    if scheme.lower() == "bearer" and bearer:
+        token, source = bearer, "bearer"
+    elif tok := request.cookies.get(ACCESS_COOKIE):
+        token, source = tok, "cookie"
+    elif _config.iam_issuer and (tok := request.cookies.get(_config.iam_cookie_name)):
+        token, source = tok, "iam_cookie"
+    else:
+        raise RbacError("AUTH_REQUIRED", "Login required", 401)
+    if source != "bearer" and request.method not in ("GET", "HEAD", "OPTIONS"):
+        # Cookies are sent by the browser on its own, so writes need proof the call came from our frontend.
+        if request.headers.get(CSRF_HEADER) != CSRF_VALUE:
+            raise RbacError("CSRF", f"Missing {CSRF_HEADER}: {CSRF_VALUE} header", 403)
+        origin = request.headers.get("origin")
+        if origin and origin not in _config.cors_allow_origins:
+            raise RbacError("CSRF", "Origin not allowed", 403)
     claims = await run_in_threadpool(decode, token)
     roles = set(claims.get("resource_access", {}).get(_config.auth_client_id, {}).get("roles", []))
     return Principal(

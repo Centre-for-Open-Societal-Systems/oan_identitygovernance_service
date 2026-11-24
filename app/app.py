@@ -15,32 +15,10 @@ from .controllers.catalogue import CatalogueController
 from .controllers.sync import SyncController
 from .controllers.users import UsersController
 from .envelope import RbacExceptionHandler
-from .models import (
-    AllowedPermission,
-    Application,
-    AuditLog,
-    Permission,
-    Realm,
-    Role,
-    RolePermission,
-    SyncRun,
-    User,
-    UserRole,
-)
+from .models import AllowedPermission, Application, AuditLog, Realm, Role, SyncRun
 
 # Parents before children (foreign keys).
-_TABLES = (
-    Realm,
-    Application,
-    Role,
-    Permission,
-    RolePermission,
-    AllowedPermission,
-    User,
-    UserRole,
-    AuditLog,
-    SyncRun,
-)
+_TABLES = (Realm, Application, Role, AllowedPermission, AuditLog, SyncRun)
 
 
 async def _create_tables() -> None:

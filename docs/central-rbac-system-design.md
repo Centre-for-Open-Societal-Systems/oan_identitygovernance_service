@@ -223,27 +223,28 @@ A scheduled job compares the registry with Keycloak and with each service, per r
 - Client in Keycloak with no application row: orphan, report.
 - Application row with no client: broken, report and offer repair.
 - Role in Keycloak with no registry row, or the reverse: report.
-- Permission set in the service different from the registry: report, and re-push if auto-repair is on.
+- Permission set in the service different from the registry: report it.
 
-Default is report only. Auto-repair is a per-application setting.
+The drift report is report only.
 
 ## 7. Data model (sketch)
 
 | Table                               | Key fields                                                                                           |
 | ----------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `realms`                          | name, keycloak realm id, status                                                                      |
-| `applications`                    | id, realm, mnemonic, keycloak client uuid, urls, owner, status                                       |
-| `roles`                           | id, application, name, description, keycloak role id, status (`active`, `pending`, `disabled`) |
-| `permissions`                     | id, application, resource, action, description                                                       |
-| `role_permissions`                | role, permission                                                                                     |
+| `applications`                    | id, realm, mnemonic (Keycloak client id), admin API url, admin API secret reference                  |
+| `roles`                           | id, application, name, keycloak role id, status (`active`, `pending`, `failed`, `imported`, `disabled`), error |
 | `allowed_permissions`             | application, resource, action (the allow-list in 3.3)                                                |
-| `users`                           | id, realm, keycloak user id, username, email, status                                                 |
-| `user_roles`                      | user, role                                                                                           |
-| `user_groups`, `user_locations` | user, group or location code                                                                         |
 | `audit_log`                       | actor, action, target, before, after, time                                                           |
 | `sync_runs`                       | realm, direction, started, finished, counts, errors                                                  |
 
-These tables live in the central RBAC's own database. IAM's tables (`staff_portal_applications`, `staff_roles`, `staff_application_permissions`, `staff_role_permissions`) are one service's data **[V]**, with the same shape as the first four tables above. IAM is onboarded as an application, and the central RBAC reads its roles and permissions through its API. A role's `status` is `pending`, `active`, `failed` or `disabled`.
+These tables live in the central RBAC's own database and hold only what no other system owns. Everything else is read live:
+
+- **Application details** (description, enabled, client uuid): the Keycloak client. Disabling an application disables its Keycloak client.
+- **Users, their groups, locations and role mappings**: Keycloak.
+- **A role's permissions**: the managed service, through its admin API.
+
+Because there is no stored copy of users or permissions, there is nothing to keep in sync for them. The drift report compares the service's live permissions with the allow-list. IAM's tables (`staff_portal_applications`, `staff_roles`, `staff_application_permissions`, `staff_role_permissions`) are one service's data **[V]**. IAM is onboarded as an application, and the central RBAC reads its roles and permissions through its API.
 
 ## 8. API surface (sketch)
 
@@ -273,5 +274,5 @@ All calls take the realm. Responses use the envelope IAM already uses (`response
 2. Create the central RBAC database with the realm and allow-list tables. Register the existing applications (15 in IAM **[V]**), link each to its Keycloak client, and run the first sync (5.1) to import their roles and users.
 3. Add role create and permission push through the service APIs, starting with one service.
 4. Add user onboarding, then groups and location.
-5. Add the sync jobs and the drift report. Turn on auto-repair for one application first.
+5. Add the sync jobs and the drift report.
 6. Add the `agent` realm and the next audiences.

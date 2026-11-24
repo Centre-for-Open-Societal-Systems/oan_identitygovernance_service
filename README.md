@@ -38,7 +38,7 @@ the staff IAM access-token cookie. Cookie-authenticated writes must send `X-Requ
 
 ## Not yet
 
-Scheduled sync, drift report and auto-repair (6), service-to-RBAC role reports (3.4), secret store beyond env refs, Alembic.
+Scheduled sync, drift report (6), service-to-RBAC role reports (3.4), secret store beyond env refs, Alembic.
 
 ## Deploy
 
