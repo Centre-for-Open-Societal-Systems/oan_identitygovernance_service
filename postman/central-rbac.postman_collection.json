@@ -1,0 +1,2243 @@
+{
+  "info": {
+    "name": "Central RBAC: Keycloak, IAM registries and Frappe services",
+    "description": "Manual versions of the calls central-rbac will automate: create users, roles and user-role mappings in Keycloak; role, permission and role-permission catalogue in the IAM staff portal; Frappe roles and doctype permissions; DA scoped assignments. Fill the environment before running.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "0. Quick start: create client, role and user in the realm",
+      "description": "Needs only kc_admin_password in the environment. Uses the default test names below; change them before running against a shared realm. 'Create' leaves the objects in place; run 'Cleanup' to remove them.",
+      "item": [
+        {
+          "name": "Create (run in order)",
+          "description": "",
+          "item": [
+            {
+              "name": "1. Get admin token",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": "{{kc_base_url}}/realms/{{kc_admin_realm}}/protocol/openid-connect/token",
+                "description": "",
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "urlencoded",
+                  "urlencoded": [
+                    {
+                      "key": "grant_type",
+                      "value": "password"
+                    },
+                    {
+                      "key": "client_id",
+                      "value": "{{kc_admin_client_id}}"
+                    },
+                    {
+                      "key": "username",
+                      "value": "{{kc_admin_user}}"
+                    },
+                    {
+                      "key": "password",
+                      "value": "{{kc_admin_password}}"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                      "pm.environment.set('kc_token', pm.response.json().access_token);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "2. Create client",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{kc_base_url}}/admin/realms/{{kc_realm}}/clients",
+                "description": "201 with a Location header ending in the client's internal UUID. 409 means the clientId already exists.",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{kc_token}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"clientId\": \"{{new_client_id}}\",\n  \"name\": \"{{new_client_id}}\",\n  \"enabled\": true,\n  \"protocol\": \"openid-connect\",\n  \"publicClient\": false,\n  \"standardFlowEnabled\": true,\n  \"directAccessGrantsEnabled\": false,\n  \"serviceAccountsEnabled\": false,\n  \"redirectUris\": [\n    \"{{new_client_redirect_uri}}\"\n  ],\n  \"webOrigins\": [\n    \"+\"\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 201', () => pm.expect(pm.response.code).to.be.oneOf([201]));",
+                      "pm.environment.set('kc_client_uuid', (pm.response.headers.get('Location') || '').split('/').pop());"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "3. Create client role",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{kc_base_url}}/admin/realms/{{kc_realm}}/clients/{{kc_client_uuid}}/roles",
+                "description": "",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{kc_token}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"{{role_name}}\",\n  \"description\": \"{{role_description}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 201', () => pm.expect(pm.response.code).to.be.oneOf([201]));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "4. Get client role (sets role id)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{kc_base_url}}/admin/realms/{{kc_realm}}/clients/{{kc_client_uuid}}/roles/{{role_name}}",
+                "description": "",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{kc_token}}"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                      "pm.environment.set('kc_role_id', pm.response.json().id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "5. Create user",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{kc_base_url}}/admin/realms/{{kc_realm}}/users",
+                "description": "",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{kc_token}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"username\": \"{{new_username}}\",\n  \"email\": \"{{new_user_email}}\",\n  \"firstName\": \"{{new_user_first_name}}\",\n  \"lastName\": \"{{new_user_last_name}}\",\n  \"enabled\": true,\n  \"emailVerified\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 201', () => pm.expect(pm.response.code).to.be.oneOf([201]));",
+                      "pm.environment.set('kc_user_id', (pm.response.headers.get('Location') || '').split('/').pop());"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "6. Set user password (temporary)",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{kc_base_url}}/admin/realms/{{kc_realm}}/users/{{kc_user_id}}/reset-password",
+                "description": "",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{kc_token}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"type\": \"password\",\n  \"value\": \"{{new_user_password}}\",\n  \"temporary\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 204', () => pm.expect(pm.response.code).to.be.oneOf([204]));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "7. Map client role to user",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{kc_base_url}}/admin/realms/{{kc_realm}}/users/{{kc_user_id}}/role-mappings/clients/{{kc_client_uuid}}",
+                "description": "",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{kc_token}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "[\n  {\n    \"id\": \"{{kc_role_id}}\",\n    \"name\": \"{{role_name}}\"\n  }\n]",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 204', () => pm.expect(pm.response.code).to.be.oneOf([204]));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "8. Verify: list user's client roles",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{kc_base_url}}/admin/realms/{{kc_realm}}/users/{{kc_user_id}}/role-mappings/clients/{{kc_client_uuid}}",
+                "description": "",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{kc_token}}"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                      "pm.test('role mapped', () => pm.expect(pm.response.json().map(r => r.name)).to.include(pm.environment.get('role_name')));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Cleanup (deletes what Create made)",
+          "description": "",
+          "item": [
+            {
+              "name": "9. Delete user",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": "{{kc_base_url}}/admin/realms/{{kc_realm}}/users/{{kc_user_id}}",
+                "description": "",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{kc_token}}"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 204', () => pm.expect(pm.response.code).to.be.oneOf([204]));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "10. Delete client (removes its roles)",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": "{{kc_base_url}}/admin/realms/{{kc_realm}}/clients/{{kc_client_uuid}}",
+                "description": "",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{kc_token}}"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 204', () => pm.expect(pm.response.code).to.be.oneOf([204]));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "1. IAM staff portal (registry role + permission catalogue)",
+      "description": "Roles and permissions live in the IAM database; the Keycloak client role of the same mnemonic is what puts the role in the user's token. All calls are POST with the G2P envelope and a CSRF double-submit pair (the collection pre-request script sets both).",
+      "item": [
+        {
+          "name": "Login through IAM (same flow the UI uses)",
+          "description": "",
+          "item": [
+            {
+              "name": "L1. List login providers",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{iam_staff_base_url}}/auth/get_login_providers",
+                "description": "Public. Note the id of the staff provider and put it in iam_login_provider_id.",
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 200', () => pm.response.to.have.status(200));",
+                      "console.log(pm.response.text().slice(0, 1500));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "L2. Start authentication transaction",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": "{{iam_staff_base_url}}/auth/start_authentication_transaction?id={{iam_login_provider_id}}&redirect_uri={{iam_return_url}}",
+                "description": "Returns the identity provider's authorization URL and a state value.",
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 200', () => pm.response.to.have.status(200));",
+                      "const j = pm.response.json();",
+                      "const d = j.data || j;",
+                      "pm.test('redirectUrl returned', () => pm.expect(d).to.have.property('redirectUrl'));",
+                      "pm.environment.set('authorization_url', d.redirectUrl);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "L3. Open Keycloak login form",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{authorization_url}}",
+                "description": "Keycloak keeps its session in cookies, so run L3 to L5 together in one run (Postman and newman keep the cookie jar).",
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "protocolProfileBehavior": {
+                "followRedirects": true
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 200', () => pm.response.to.have.status(200));",
+                      "const html = pm.response.text();",
+                      "let m = html.match(/<form\b[^>]*\bid=[\"']kc-form-login[\"'][^>]*action=[\"']([^\"']+)[\"']/i) || html.match(/action=[\"']([^\"']+)[\"']/i);",
+                      "pm.test('login form present', () => pm.expect(m).to.not.be.null);",
+                      "if (m) pm.environment.set('kc_login_action', m[1].replace(/&amp;/g, '&'));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "L4. Sign in at Keycloak",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": "{{kc_login_action}}",
+                "description": "Keycloak answers 302 with the IAM callback URL (it carries the authorization code).",
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "urlencoded",
+                  "urlencoded": [
+                    {
+                      "key": "username",
+                      "value": "{{iam_staff_user}}"
+                    },
+                    {
+                      "key": "password",
+                      "value": "{{iam_staff_password}}"
+                    },
+                    {
+                      "key": "credentialId",
+                      "value": ""
+                    }
+                  ]
+                }
+              },
+              "protocolProfileBehavior": {
+                "followRedirects": false
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('redirect with code', () => pm.expect([302, 303]).to.include(pm.response.code));",
+                      "const loc = pm.response.headers.get('Location') || '';",
+                      "pm.test('callback location present', () => pm.expect(loc).to.not.be.empty);",
+                      "pm.environment.set('iam_callback_url', loc);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "L5. Complete IAM callback (sets iam_token)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{iam_callback_url}}",
+                "description": "IAM exchanges the code and sets X-Access-Token as a cookie. The script reads it and stores it as iam_token.",
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "protocolProfileBehavior": {
+                "followRedirects": false
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('callback redirects', () => pm.expect([302, 303, 307]).to.include(pm.response.code));",
+                      "const toks = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie')",
+                      "  .map(h => (h.value.match(/^X-Access-Token=([^;]*)/i) || [])[1]).filter(Boolean);",
+                      "const t = (toks[toks.length - 1] || '').replace(/^\"|\"$/g, '');",
+                      "pm.test('IAM issued access token', () => pm.expect(t).to.not.be.empty);",
+                      "if (t) pm.environment.set('iam_token', t);",
+                      "// IAM sets its own double-submit CSRF cookie at login; later calls must echo that value in X-CSRF-Token",
+                      "const csrfs = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie')",
+                      "  .map(h => (h.value.match(/^X-CSRF-Token=([^;]*)/i) || [])[1]).filter(Boolean);",
+                      "if (csrfs.length) pm.environment.set('csrf_token', csrfs[csrfs.length - 1].replace(/^\"|\"$/g, ''));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "L6. Who am I (get_logged_in_user)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{iam_staff_base_url}}/auth/get_logged_in_user",
+                "description": "",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{iam_token}}"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 200', () => pm.response.to.have.status(200));",
+                      "console.log(pm.response.text().slice(0, 800));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "L7. Token principal (get_user_profile)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{iam_staff_base_url}}/auth/get_user_profile",
+                "description": "Shows client_roles. The caller needs IAM_ADMIN under client_roles['iam-staff-ui'] for the calls below.",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{iam_token}}"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 200', () => pm.response.to.have.status(200));",
+                      "const p = pm.response.json();",
+                      "pm.test('has IAM_ADMIN on iam-staff-ui', () => pm.expect(((p.client_roles || {})['iam-staff-ui'] || [])).to.include('IAM_ADMIN'));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "List applications",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf_token}}"
+              }
+            ],
+            "url": "{{iam_staff_base_url}}/applications/get_applications",
+            "description": "Find the application_id for the registry (one of the registered mnemonics).",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{iam_token}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_header\": {\n    \"sender_app_mnemonic\": \"central-rbac-postman\",\n    \"sender_app_url\": \"http://localhost\",\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\"\n  },\n  \"request_body\": {\n    \"request_payload\": {}\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "console.log(JSON.stringify(j).slice(0, 2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List roles",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf_token}}"
+              }
+            ],
+            "url": "{{iam_staff_base_url}}/applications/get_roles",
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{iam_token}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_header\": {\n    \"sender_app_mnemonic\": \"central-rbac-postman\",\n    \"sender_app_url\": \"http://localhost\",\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\"\n  },\n  \"request_body\": {\n    \"request_payload\": {\n      \"application_id\": \"{{iam_application_id}}\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const p = (pm.response.json().response_body || {}).response_payload;",
+                  "const rows = Array.isArray(p) ? p : (p ? [p] : []);",
+                  "const hit = rows.find(r => r.role_mnemonic === pm.variables.get(\"role_name\"));",
+                  "if (hit) { pm.environment.set(\"iam_role_id\", String(hit.id)); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create role",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf_token}}"
+              }
+            ],
+            "url": "{{iam_staff_base_url}}/applications/create_role",
+            "description": "There is no update_role route, so a role cannot be renamed here: create the new one, move mappings, delete the old one.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{iam_token}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_header\": {\n    \"sender_app_mnemonic\": \"central-rbac-postman\",\n    \"sender_app_url\": \"http://localhost\",\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\"\n  },\n  \"request_body\": {\n    \"request_payload\": {\n      \"application_id\": \"{{iam_application_id}}\",\n      \"role_mnemonic\": \"{{role_name}}\",\n      \"role_description\": \"{{role_description}}\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const p = (pm.response.json().response_body || {}).response_payload;",
+                  "const rows = Array.isArray(p) ? p : (p ? [p] : []);",
+                  "const hit = rows.find(r => r.role_mnemonic === pm.variables.get(\"role_name\"));",
+                  "if (hit) { pm.environment.set(\"iam_role_id\", String(hit.id)); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List permissions",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf_token}}"
+              }
+            ],
+            "url": "{{iam_staff_base_url}}/applications/get_permissions",
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{iam_token}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_header\": {\n    \"sender_app_mnemonic\": \"central-rbac-postman\",\n    \"sender_app_url\": \"http://localhost\",\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\"\n  },\n  \"request_body\": {\n    \"request_payload\": {\n      \"application_id\": \"{{iam_application_id}}\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const p = (pm.response.json().response_body || {}).response_payload;",
+                  "const rows = Array.isArray(p) ? p : (p ? [p] : []);",
+                  "const hit = rows.find(r => r.permission_mnemonic === pm.variables.get(\"permission_name\"));",
+                  "if (hit) { pm.environment.set(\"iam_permission_id\", String(hit.id)); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create permission",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf_token}}"
+              }
+            ],
+            "url": "{{iam_staff_base_url}}/applications/create_permission",
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{iam_token}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_header\": {\n    \"sender_app_mnemonic\": \"central-rbac-postman\",\n    \"sender_app_url\": \"http://localhost\",\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\"\n  },\n  \"request_body\": {\n    \"request_payload\": {\n      \"application_id\": \"{{iam_application_id}}\",\n      \"permission_mnemonic\": \"{{permission_name}}\",\n      \"permission_description\": \"{{permission_description}}\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const p = (pm.response.json().response_body || {}).response_payload;",
+                  "const rows = Array.isArray(p) ? p : (p ? [p] : []);",
+                  "const hit = rows.find(r => r.permission_mnemonic === pm.variables.get(\"permission_name\"));",
+                  "if (hit) { pm.environment.set(\"iam_permission_id\", String(hit.id)); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List role-permission mappings",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf_token}}"
+              }
+            ],
+            "url": "{{iam_staff_base_url}}/applications/get_role_permissions",
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{iam_token}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_header\": {\n    \"sender_app_mnemonic\": \"central-rbac-postman\",\n    \"sender_app_url\": \"http://localhost\",\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\"\n  },\n  \"request_body\": {\n    \"request_payload\": {\n      \"application_id\": \"{{iam_application_id}}\",\n      \"role_id\": \"{{iam_role_id}}\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Map permission to role",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf_token}}"
+              }
+            ],
+            "url": "{{iam_staff_base_url}}/applications/create_role_permission",
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{iam_token}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_header\": {\n    \"sender_app_mnemonic\": \"central-rbac-postman\",\n    \"sender_app_url\": \"http://localhost\",\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\"\n  },\n  \"request_body\": {\n    \"request_payload\": {\n      \"application_id\": \"{{iam_application_id}}\",\n      \"role_id\": \"{{iam_role_id}}\",\n      \"permission_id\": \"{{iam_permission_id}}\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const p = (pm.response.json().response_body || {}).response_payload;",
+                  "if (p && p.id) { pm.environment.set(\"iam_role_permission_id\", String(p.id)); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unmap permission from role",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf_token}}"
+              }
+            ],
+            "url": "{{iam_staff_base_url}}/applications/delete_role_permission",
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{iam_token}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_header\": {\n    \"sender_app_mnemonic\": \"central-rbac-postman\",\n    \"sender_app_url\": \"http://localhost\",\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\"\n  },\n  \"request_body\": {\n    \"request_payload\": {\n      \"application_id\": \"{{iam_application_id}}\",\n      \"id\": \"{{iam_role_permission_id}}\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Delete role",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf_token}}"
+              }
+            ],
+            "url": "{{iam_staff_base_url}}/applications/delete_role",
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{iam_token}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_header\": {\n    \"sender_app_mnemonic\": \"central-rbac-postman\",\n    \"sender_app_url\": \"http://localhost\",\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\"\n  },\n  \"request_body\": {\n    \"request_payload\": {\n      \"application_id\": \"{{iam_application_id}}\",\n      \"id\": \"{{iam_role_id}}\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Delete permission",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf_token}}"
+              }
+            ],
+            "url": "{{iam_staff_base_url}}/applications/delete_permission",
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{iam_token}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_header\": {\n    \"sender_app_mnemonic\": \"central-rbac-postman\",\n    \"sender_app_url\": \"http://localhost\",\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\"\n  },\n  \"request_body\": {\n    \"request_payload\": {\n      \"application_id\": \"{{iam_application_id}}\",\n      \"id\": \"{{iam_permission_id}}\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Service admin API (oan_auth_service wrappers on any oan_* site)",
+      "description": "Wrappers in oan_auth_service (api/v1/admin.py): no raw Frappe methods, no API key. Set service_base_url to the gateway host of the service, fill service_admin_user and service_admin_password, then run '0. Login' and the quick start. Roles and doctypes are limited to the site's service prefix.",
+      "item": [
+        {
+          "name": "0. Login (sets app_jwt)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{service_base_url}}/v1/auth/login",
+            "description": "Local login of a user holding System Manager or Administrator on that site (the admin routes require it). Sets app_jwt, used by this folder and by folder 3. Rate limited to 30 per minute.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usr\": \"{{service_admin_user}}\",\n  \"pwd\": \"{{service_admin_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "const d = (j.data || j.message || j);",
+                  "pm.test('token issued', () => pm.expect(d.access_token).to.be.a('string'));",
+                  "pm.environment.set('app_jwt', d.access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Quick start: onboard a user (run in order)",
+          "description": "",
+          "item": [
+            {
+              "name": "1. List roles of this service (picks the test roles)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{service_base_url}}/v1/admin/roles",
+                "description": "Read only. Picks a non-admin role as service_role, and a second one as service_role_2. Set service_role_name in the environment to force a role. A 400 'No service prefix is configured' means the site has no oan_service_prefix hook or service_prefix config.",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{app_jwt}}"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                      "",
+                      "const j = pm.response.json();",
+                      "let d = (j.data !== undefined ? j.data : j);",
+                      "if (d && !Array.isArray(d)) d = d.roles || d.items || d.data || [];",
+                      "const names = (d || []).map(r => typeof r === 'string' ? r : (r.name || r.role)).filter(Boolean);",
+                      "const plain = names.filter(n => !/admin|manager/i.test(n));",
+                      "const pool = plain.length ? plain : names;",
+                      "pm.test('service has roles', () => pm.expect(names.length).to.be.above(0));",
+                      "const pre = pm.environment.get('service_role_name');",
+                      "pm.environment.set('service_role', pre && names.includes(pre) ? pre : pool[0]);",
+                      "const second = pool.find(n => n !== pm.environment.get('service_role'));",
+                      "pm.environment.set('service_role_2', second || '');",
+                      "console.log('roles:', names.join(', '), '| using', pm.environment.get('service_role'), '/', second || '(no second role)');"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "2. Create user",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{service_base_url}}/v1/admin/users",
+                "description": "Creates a throw-away account with a unique email per run. There is no delete route, so cleanup disables it.",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{app_jwt}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"full_name\": \"Rbac Test\",\n  \"email\": \"{{quick_user_email}}\",\n  \"roles\": [\n    \"{{service_role}}\"\n  ],\n  \"temporary_password\": \"{{new_user_password}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.environment.set('quick_user_email', 'rbac.test.' + Date.now() + '@example.com');"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 200, 201', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                      "const cu = pm.response.json();",
+                      "const cd = cu.data || cu;",
+                      "pm.test(\"returns the user id\", () => pm.expect(cd.user).to.be.a(\"string\"));",
+                      "pm.environment.set(\"quick_user_id\", encodeURIComponent(cd.user));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "3. Get user",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{service_base_url}}/v1/admin/users/{{quick_user_id}}",
+                "description": "",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{app_jwt}}"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "4. Update user (name)",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{service_base_url}}/v1/admin/users/{{quick_user_id}}",
+                "description": "",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{app_jwt}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"full_name\": \"Rbac Test Updated\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "5. List the user's roles",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{service_base_url}}/v1/admin/users/{{quick_user_id}}/roles",
+                "description": "",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{app_jwt}}"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                      "pm.test('has the role', () => pm.expect(pm.response.text()).to.include(pm.environment.get('service_role')));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "6. Grant a second role",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{service_base_url}}/v1/admin/users/{{quick_user_id}}/roles",
+                "description": "Skipped when the service has only one non-admin role.",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{app_jwt}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"roles\": [\n    \"{{service_role_2}}\"\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (!pm.environment.get('service_role_2')) { pm.execution.skipRequest(); }"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "7. Revoke the second role",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": "{{service_base_url}}/v1/admin/users/{{quick_user_id}}/roles/{{service_role_2}}",
+                "description": "",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{app_jwt}}"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (!pm.environment.get('service_role_2')) { pm.execution.skipRequest(); }"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "8. Reissue temporary password",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{service_base_url}}/v1/admin/users/{{quick_user_id}}/temporary-password",
+                "description": "",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{app_jwt}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"temporary_password\": \"{{new_user_password}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "9. Revoke sessions",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": "{{service_base_url}}/v1/admin/users/{{quick_user_id}}/sessions",
+                "description": "",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{app_jwt}}"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 200, 204', () => pm.expect(pm.response.code).to.be.oneOf([200, 204]));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "User permissions: restrict the quick-start user to one record (run after the quick start, before Cleanup)",
+          "item": [
+            {
+              "name": "1. Add record restriction",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{service_base_url}}/v1/admin/users/{{quick_user_id}}/user-permissions",
+                "description": "Limits the user to one record (`restrict_value`) of a service doctype (`restrict_doctype`). Skipped until both are set in the environment. Needs the gateway route for POST /v1/admin/users/:user_id/user-permissions.",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{app_jwt}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"allow\": \"{{restrict_doctype}}\",\n  \"for_value\": \"{{restrict_value}}\",\n  \"apply_to_all_doctypes\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (!pm.environment.get('restrict_doctype') || !pm.environment.get('restrict_value') || !pm.environment.get('quick_user_id')) { pm.execution.skipRequest(); }"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 201', () => pm.expect(pm.response.code).to.eql(201));",
+                      "const d = pm.response.json().data || {};",
+                      "if (d.name) { pm.environment.set('user_permission_name', d.name); }"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "2. List record restrictions",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{service_base_url}}/v1/admin/users/{{quick_user_id}}/user-permissions",
+                "description": "Restrictions of the user on this service's doctypes only.",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{app_jwt}}"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (!pm.environment.get('quick_user_id')) { pm.execution.skipRequest(); }"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "3. Remove record restriction",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": "{{service_base_url}}/v1/admin/users/{{quick_user_id}}/user-permissions/{{user_permission_name}}",
+                "description": "Deletes the restriction added in step 1.",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{app_jwt}}"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (!pm.environment.get('user_permission_name')) { pm.execution.skipRequest(); }"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                      "pm.environment.unset('user_permission_name');"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Cleanup (disables, then deletes the test user)",
+          "description": "",
+          "item": [
+            {
+              "name": "10. Disable user",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{service_base_url}}/v1/admin/users/{{quick_user_id}}",
+                "description": "Disables the test user. The next step deletes it.",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{app_jwt}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"enabled\": false\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "11. Delete user",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{service_base_url}}/v1/admin/users/{{quick_user_id}}",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{app_jwt}}"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"status 200\", () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Roles: create, disable and delete a test role (run in order)",
+          "item": [
+            {
+              "name": "1. Create role",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{service_base_url}}/v1/admin/roles",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{app_jwt}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"role\": \"{{new_role_name}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"status 200, 201\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                      "pm.environment.set(\"role_to_delete\", pm.environment.get(\"new_role_name\"));"
+                    ]
+                  }
+                },
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const base = (pm.environment.get(\"service_role\") || \"\").split(\" \")[0];",
+                      "pm.environment.set(\"new_role_name\", base + \" RBAC Test \" + Date.now());"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "2. Get role",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{service_base_url}}/v1/admin/roles/{{new_role_name}}",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{app_jwt}}"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"status 200\", () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "3. Disable role",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{service_base_url}}/v1/admin/roles/{{new_role_name}}",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{app_jwt}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"disabled\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"status 200\", () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "4. Delete role",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{service_base_url}}/v1/admin/roles/{{new_role_name}}",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{app_jwt}}"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"status 200\", () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Reference: list users and permissions (read only)",
+          "description": "",
+          "item": [
+            {
+              "name": "List users",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{service_base_url}}/v1/admin/users",
+                "description": "",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{app_jwt}}"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "List permissions",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{service_base_url}}/v1/admin/permissions?role={{service_role}}&doctype={{doctype}}",
+                "description": "Drop either query parameter to list more. if_owner rules are listed but cannot be edited here.",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{app_jwt}}"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Permission catalogue (roles, doctypes, rights)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{service_base_url}}/v1/admin/permissions/catalogue",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{app_jwt}}"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"status 200\", () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                      "const c = pm.response.json().data;",
+                      "pm.test(\"has roles, doctypes and rights\", () => pm.expect(c.rights).to.be.an(\"array\").that.is.not.empty);"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Permissions: changes the site's rules (run deliberately, not part of the quick start)",
+          "description": "",
+          "item": [
+            {
+              "name": "Set permissions (grant or revoke rights)",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{service_base_url}}/v1/admin/permissions",
+                "description": "true grants a right, false revokes it. The first change to a doctype copies ALL its standard rules into custom rules; from then on the app's DocType JSON no longer applies on migrate until the doctype is reset.",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{app_jwt}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"role\": \"{{role_name}}\",\n  \"doctype\": \"{{doctype}}\",\n  \"permlevel\": 0,\n  \"permissions\": {\n    \"read\": true,\n    \"write\": false,\n    \"create\": false,\n    \"delete\": false\n  }\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Remove a role's rule on a doctype",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{service_base_url}}/v1/admin/permissions",
+                "description": "",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{app_jwt}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"role\": \"{{role_name}}\",\n  \"doctype\": \"{{doctype}}\",\n  \"permlevel\": 0\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Reset doctype to standard permissions",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{service_base_url}}/v1/admin/permissions/reset",
+                "description": "Deletes every custom rule of the doctype, for all roles. Destructive.",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{app_jwt}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"doctype\": \"{{doctype}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. DA Services scoped role assignments",
+      "description": "Paths follow da_services/api/v1/rbac.py. These take a JWT (app_jwt): run folder 2, request 0 (Login), first.",
+      "item": [
+        {
+          "name": "List assignments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{service_base_url}}/v1/da-services/rbac-assignments?user={{new_user_email}}&limit=50",
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{app_jwt}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Grant role within a scope",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{service_base_url}}/v1/da-services/rbac-assignments",
+            "description": "The Frappe User must already exist. Scope fields are optional; the role's scope type decides which are used.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{app_jwt}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user\": \"{{new_user_email}}\",\n  \"role\": \"{{role_name}}\",\n  \"region_scope\": \"{{region_scope}}\",\n  \"zone_scope\": \"\",\n  \"woreda_scope\": \"\",\n  \"da_id\": \"\",\n  \"effective_from\": \"\",\n  \"effective_to\": \"\",\n  \"notes\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = pm.response.json();",
+                  "const row = (d.data || d.message || {});",
+                  "if (row.name) pm.environment.set('da_assignment_id', row.name);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get assignment",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{service_base_url}}/v1/da-services/rbac-assignments/{{da_assignment_id}}",
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{app_jwt}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Change scope, window or active flag",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{service_base_url}}/v1/da-services/rbac-assignments/{{da_assignment_id}}",
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{app_jwt}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"region_scope\": \"{{region_scope}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Revoke assignment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{service_base_url}}/v1/da-services/rbac-assignments/{{da_assignment_id}}/revoke",
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{app_jwt}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"removed by admin\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// IAM staff portal double-submit CSRF: the header must equal the X-CSRF-Token cookie. The login step (L5) stores the",
+          "// server-issued value in csrf_token and the cookie jar replays it; generate one (header + cookie) only when there is none.",
+          "const reqUrl = pm.variables.replaceIn(pm.request.url.toString());",
+          "if (reqUrl.indexOf(pm.environment.get('iam_staff_base_url') || '\\u0000') === 0) {",
+          "  let csrf = pm.environment.get('csrf_token');",
+          "  if (!csrf) {",
+          "    csrf = pm.variables.replaceIn('{{$guid}}');",
+          "    pm.environment.set('csrf_token', csrf);",
+          "    pm.request.headers.upsert({ key: 'Cookie', value: 'X-CSRF-Token=' + csrf });",
+          "  }",
+          "  pm.request.headers.upsert({ key: 'X-CSRF-Token', value: csrf });",
+          "}"
+        ]
+      }
+    }
+  ]
+}

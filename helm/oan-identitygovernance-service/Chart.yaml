@@ -1,0 +1,29 @@
+apiVersion: v2
+name: oan-identitygovernance-service
+description: OAN Identity Governance Service (central RBAC) for OpenAgriNet (OAN); manages roles and users centrally and syncs them with Keycloak and the managed services.
+type: application
+version: 0.1.0-dev.1
+appVersion: 0.1.0
+dependencies:
+- name: common
+  repository: https://openg2p.github.io/openg2p-helm
+  version: 2.30.0
+- name: postgres-init
+  version: 1.2.0
+  repository: https://openg2p.github.io/openg2p-helm
+  condition: postgres-init.enabled
+home: https://github.com/Centre-for-Open-Societal-Systems/oan_identitygovernance_service
+sources:
+- https://github.com/Centre-for-Open-Societal-Systems/oan_identitygovernance_service
+icon: https://openg2p.github.io/openg2p-helm/openg2p-logo.png
+keywords:
+  - openg2p
+  - oan
+  - rbac
+  - identity-governance
+maintainers:
+- name: OpenAgriNet (OAN)
+  url: https://github.com/Centre-for-Open-Societal-Systems
+annotations:
+  oan.org/owner: OpenAgriNet (OAN)
+  oan.org/application-source: https://github.com/Centre-for-Open-Societal-Systems/oan_identitygovernance_service

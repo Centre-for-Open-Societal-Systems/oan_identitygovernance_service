@@ -1,0 +1,129 @@
+global:
+  hostname: 'rbac.trial.openg2p.org'
+
+  # Database (provisioned by the postgres-init subchart)
+  postgresqlHost: commons-postgresql
+  rbacDB: '{{ printf "%s" .Release.Name | replace "-" "_" }}'
+  rbacDBPort: 5432
+  rbacDBUser: '{{ printf "%s_user" .Release.Name | replace "-" "_" }}'
+  rbacDBSecret: '{{ .Release.Name }}'
+  rbacDBUserPasswordKey: '{{ .Release.Name }}-db-user'
+
+  # Keycloak (shared commons-keycloak deployment)
+  keycloakBaseUrl: 'https://keycloak.{{ .Release.Namespace }}.openg2p.org'
+
+postgres-init:
+  enabled: true
+  postgresql:
+    host: '{{ .Values.global.postgresqlHost }}'
+    port: 5432
+    existingSecret: commons-postgresql
+    existingSecretPostgresPasswordKey: postgres-password
+  databases:
+    - name: '{{ tpl .Values.global.rbacDB $ }}'
+      user: '{{ tpl .Values.global.rbacDBUser $ }}'
+      secret: '{{ tpl .Values.global.rbacDBSecret $ }}'
+      secretUserPasswordKey: '{{ tpl .Values.global.rbacDBUserPasswordKey $ }}'
+
+image:
+  registry: docker.io
+  repository: openg2p/oan-identitygovernance-service
+  tag: develop
+  pullPolicy: Always
+  pullSecrets: []
+
+replicaCount: 1
+containerPort: 8000
+
+# The Keycloak client `central-rbac` is registered by hand in the master realm
+# (confidential, standard flow enabled, redirect URI ${PUBLIC_URL}/auth/callback).
+# Its secret is read from an existing Secret.
+keycloakClient:
+  clientId: central-rbac
+  existingSecret: central-rbac-keycloak-client
+  existingSecretKey: client_secret
+
+# Rendered as container env vars; string values are passed through `tpl`.
+envVars:
+  RBAC_KEYCLOAK_URL: '{{ tpl .Values.global.keycloakBaseUrl $ }}'
+  RBAC_KEYCLOAK_ADMIN_REALM: staff
+  RBAC_KEYCLOAK_CLIENT_ID: '{{ .Values.keycloakClient.clientId }}'
+  RBAC_AUTH_REALM: staff
+  RBAC_AUTH_CLIENT_ID: '{{ .Values.keycloakClient.clientId }}'
+  RBAC_PUBLIC_URL: 'https://{{ .Values.global.hostname }}'
+  RBAC_POST_LOGIN_URL: 'https://{{ .Values.global.hostname }}/'
+  RBAC_COOKIE_SECURE: 'true'
+  RBAC_CORS_ALLOW_ORIGINS: '["https://{{ .Values.global.hostname }}"]'
+  # Optional: accept the staff IAM access-token cookie too
+  RBAC_IAM_ISSUER: ''
+  RBAC_IAM_CLIENT_ID: ''
+  RBAC_IAM_COOKIE_NAME: X-Access-Token
+
+# Extra env vars as raw valueFrom blocks, e.g. envVarsFrom.FOO: {secretKeyRef: {...}}
+envVarsFrom: {}
+
+command: []
+args: ['uvicorn', 'app.main:app', '--host', '0.0.0.0', '--port', '8000']
+
+service:
+  type: ClusterIP
+  port: 80
+
+serviceAccount:
+  create: true
+  name: ''
+
+commonLabels: {}
+commonAnnotations: {}
+podLabels: {}
+podAnnotations: {}
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 512Mi
+
+podSecurityContext:
+  enabled: true
+  runAsNonRoot: true
+  fsGroup: 1001
+containerSecurityContext:
+  enabled: true
+  allowPrivilegeEscalation: false
+  runAsUser: 1001
+
+startupProbe:
+  enabled: true
+  httpGet: {path: /ping, port: http}
+  periodSeconds: 5
+  failureThreshold: 30
+livenessProbe:
+  enabled: true
+  httpGet: {path: /ping, port: http}
+  periodSeconds: 20
+readinessProbe:
+  enabled: true
+  httpGet: {path: /ping, port: http}
+  periodSeconds: 10
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+istio:
+  enabled: true
+  gateway:
+    enabled: true
+    host: ''
+    ingressController:
+      istio: ingressgateway
+    httpEnabled: true
+    httpTlsRedirect: true
+    httpsEnabled: false
+    tls: {}
+  virtualservice:
+    enabled: true
+    host: '{{ .Values.global.hostname }}'
+    gateway: '{{ .Release.Name }}'
