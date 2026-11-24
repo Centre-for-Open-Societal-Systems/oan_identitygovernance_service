@@ -1,0 +1,23 @@
+# Values for the oan-identitygovernance-service chart (helm/oan-identitygovernance-service).
+# Target: the oan_dev k3s node, like oan-grievance-service.
+#
+# Set at install, not here:
+# - image.tag: the immutable build tag
+# - global.keycloakBaseUrl: the Keycloak of this environment
+# Create before install, in the release namespace:
+# - Secret central-rbac-keycloak-client (key client_secret): secret of the hand-registered
+#   `central-rbac` client in the master realm (standard flow on, redirect URI https://<host>/auth/callback)
+
+global:
+  hostname: identitygovernance-service.development.oanstaging.com
+
+image:
+  registry: 379220350808.dkr.ecr.ap-south-1.amazonaws.com
+  repository: eoan/oan-identitygovernance-service/identitygovernance-service
+  pullPolicy: IfNotPresent
+
+# No imagePullSecrets on oan_dev: the node pulls from ECR with its IAM role.
+
+# The oan_dev edge is APISIX, not Istio; route the host to this Service from the gateway chart.
+istio:
+  enabled: false
