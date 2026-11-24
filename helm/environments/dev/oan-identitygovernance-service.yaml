@@ -3,13 +3,13 @@
 #
 # Set at install, not here:
 # - image.tag: the immutable build tag
-# - global.keycloakBaseUrl: the Keycloak of this environment
 # Create before install, in the release namespace:
 # - Secret central-rbac-keycloak-client (key client_secret): secret of the hand-registered
 #   `central-rbac` client in the master realm (standard flow on, redirect URI https://<host>/auth/callback)
 
 global:
   hostname: identitygovernance-service.development.oanstaging.com
+  keycloakBaseUrl: https://keycloak.development.oanstaging.com
 
 image:
   registry: 379220350808.dkr.ecr.ap-south-1.amazonaws.com

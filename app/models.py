@@ -36,7 +36,6 @@ class Application(BaseORMModel):
     mnemonic: Mapped[str] = mapped_column(String(100))  # the Keycloak clientId
     admin_api_url: Mapped[str | None] = mapped_column(String(500))
     # Name of the env var / secret-store key holding the service's admin API token. Never the value.
-    admin_api_secret_ref: Mapped[str | None] = mapped_column(String(200))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     roles: Mapped[list["Role"]] = relationship(back_populates="application")

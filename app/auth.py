@@ -47,6 +47,7 @@ class Principal:
     email: str | None = None
     name: str | None = None
     source: str = "bearer"
+    token: str = ""
 
 
 def decode(token: str) -> dict:
@@ -91,7 +92,7 @@ async def current_principal(request: Request) -> Principal:
     roles = set(claims.get("resource_access", {}).get(_config.auth_client_id, {}).get("roles", []))
     return Principal(
         sub=claims["sub"], username=claims.get("preferred_username", claims["sub"]), roles=roles,
-        email=claims.get("email"), name=claims.get("name"), source=source,
+        email=claims.get("email"), name=claims.get("name"), source=source, token=token,
     )
 
 

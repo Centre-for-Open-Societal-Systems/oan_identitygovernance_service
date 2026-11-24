@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import schemas
 from app.adapters.service import ServiceAdapter
 from app.auth import ADMIN, OPERATOR, VIEWER, Principal, require
+from app.config import Settings
 from app.db import get_session
 from app.envelope import RbacError, ok
 from app.keycloak import keycloak
@@ -13,6 +14,9 @@ from app.models import AllowedPermission, Application, Realm, Role
 from app.schemas import ApplicationCreatedOut, ApplicationOut, RoleOut
 from app.services.common import audit, get_app, get_client, get_role
 from app.services.sync import first_sync
+
+_config = Settings.get_config(strict=False)
+CENTRAL_ADMIN_ROLE = "OAN Administrator"
 
 
 class CatalogueController(BaseController):
@@ -70,7 +74,14 @@ class CatalogueController(BaseController):
             client_uuid = existing["id"]
         secret = (await keycloak.request("GET", f"/{body.realm}/clients/{client_uuid}/client-secret")).json()["value"]
 
-        app = Application(realm=body.realm, mnemonic=body.mnemonic, admin_api_url=body.admin_api_url, admin_api_secret_ref=body.admin_api_secret_ref)
+        # The operator administers the application from now on: the role is created on its own client and granted to
+        # them, so a token they log in with next carries it and the service maps it to its Frappe role of that name.
+        await keycloak.create_client_role(body.realm, client_uuid, CENTRAL_ADMIN_ROLE)
+        if body.realm == _config.auth_realm:
+            role = next(r for r in await keycloak.list_client_roles(body.realm, client_uuid) if r["name"] == CENTRAL_ADMIN_ROLE)
+            await keycloak.add_client_roles(body.realm, p.sub, client_uuid, [role])
+
+        app = Application(realm=body.realm, mnemonic=body.mnemonic, admin_api_url=body.admin_api_url)
         db.add(app)
         audit(db, p.username, "application.create", f"{app.realm}/{app.mnemonic}", after={"client": client_uuid})
         await db.commit()
@@ -122,9 +133,9 @@ class CatalogueController(BaseController):
         await db.commit()
 
         try:
-            async with ServiceAdapter(app) as svc:
-                created = await svc.request("POST", "/roles", json={"name": body.name, "description": body.description})
-            role.keycloak_role_id, role.status = created.get("keycloak_role_id"), "active"
+            async with ServiceAdapter(app, p.token) as svc:
+                await svc.create_role(body.name)
+            role.status = "active"
         except RbacError as e:
             role.status, role.error = "failed", e.message
         audit(db, p.username, "role.create", f"{app.mnemonic}/{body.name}", after={"status": role.status, "error": role.error})
@@ -139,10 +150,10 @@ class CatalogueController(BaseController):
             q = q.where(Role.status == status)
         return ok([RoleOut.model_validate(r) for r in await db.scalars(q)])
 
-    async def get_role_permissions(self, role_id: str, db: AsyncSession = Depends(get_session), _: Principal = Depends(require(VIEWER, OPERATOR))):
+    async def get_role_permissions(self, role_id: str, db: AsyncSession = Depends(get_session), p: Principal = Depends(require(VIEWER, OPERATOR))):
         """Read live from the managed service."""
         role = await get_role(db, role_id)
-        async with ServiceAdapter(await get_app(db, role.application_id)) as svc:
+        async with ServiceAdapter(await get_app(db, role.application_id), p.token) as svc:
             return ok(await svc.get_permissions(role.name))
 
     async def set_role_permissions(self, role_id: str, body: schemas.RolePermissionsIn, db: AsyncSession = Depends(get_session), p: Principal = Depends(require(OPERATOR))):
@@ -162,9 +173,9 @@ class CatalogueController(BaseController):
             raise RbacError("NOT_ALLOWED", f"Not in the allow-list for {app.mnemonic}: {rejected}", 422)
 
         pairs = [{"resource": r, "action": a} for r, a in sorted(wanted)]
-        async with ServiceAdapter(app) as svc:
+        async with ServiceAdapter(app, p.token) as svc:
             before = await svc.get_permissions(role.name)
-            await svc.request("PUT", f"/roles/{role.name}/permissions", json={"permissions": pairs})
+            await svc.set_permissions(role.name, pairs)
         audit(db, p.username, "role.permissions.set", f"{app.mnemonic}/{role.name}", before={"count": len(before)}, after={"permissions": sorted(wanted)})
         await db.commit()
         return ok(pairs)
@@ -182,8 +193,8 @@ class CatalogueController(BaseController):
     async def disable_role(self, role_id: str, db: AsyncSession = Depends(get_session), p: Principal = Depends(require(OPERATOR))):
         role = await get_role(db, role_id)
         app = await get_app(db, role.application_id)
-        async with ServiceAdapter(app) as svc:
-            await svc.request("DELETE", f"/roles/{role.name}")
+        async with ServiceAdapter(app, p.token) as svc:
+            await svc.disable_role(role.name)
         before = {"status": role.status}
         role.status = "disabled"
         audit(db, p.username, "role.disable", f"{app.mnemonic}/{role.name}", before=before, after={"status": "disabled"})

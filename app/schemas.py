@@ -12,7 +12,6 @@ class ApplicationIn(BaseModel):
     mnemonic: str = Field(pattern=r"^[A-Za-z0-9._-]+$")
     description: str | None = None  # stored on the Keycloak client, not here
     admin_api_url: str | None = None
-    admin_api_secret_ref: str | None = None
 
 
 class RoleIn(BaseModel):

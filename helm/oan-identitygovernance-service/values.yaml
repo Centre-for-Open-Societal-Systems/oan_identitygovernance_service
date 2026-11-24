@@ -48,7 +48,7 @@ envVars:
   RBAC_KEYCLOAK_URL: '{{ tpl .Values.global.keycloakBaseUrl $ }}'
   RBAC_KEYCLOAK_ADMIN_REALM: master
   RBAC_KEYCLOAK_CLIENT_ID: '{{ .Values.keycloakClient.clientId }}'
-  RBAC_AUTH_REALM: master
+  RBAC_AUTH_REALM: staff
   RBAC_AUTH_CLIENT_ID: '{{ .Values.keycloakClient.clientId }}'
   RBAC_PUBLIC_URL: 'https://{{ .Values.global.hostname }}'
   RBAC_POST_LOGIN_URL: 'https://{{ .Values.global.hostname }}/'

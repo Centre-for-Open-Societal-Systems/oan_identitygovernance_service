@@ -1,0 +1,1140 @@
+{
+  "info": {
+    "name": "central-rbac service (own routes)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Run order: 0 Setup (Keycloak) -> start the service with RBAC_KEYCLOAK_CLIENT_SECRET={{rbac_client_secret}} -> 1 Service routes -> 2 Cleanup. Uses the kc_* variables of the Postman environment."
+  },
+  "item": [
+    {
+      "name": "0. Setup: client, operator and permissions in Keycloak",
+      "item": [
+        {
+          "name": "Admin token",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{kc_base_url}}/realms/{{kc_admin_realm}}/protocol/openid-connect/token",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{kc_admin_client_id}}"
+                },
+                {
+                  "key": "username",
+                  "value": "{{kc_admin_user}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{kc_admin_password}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.environment.set('kc_token', pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create client central-rbac",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kc_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{kc_base_url}}/admin/realms/master/clients",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clientId\": \"central-rbac\",\n  \"enabled\": true,\n  \"publicClient\": false,\n  \"serviceAccountsEnabled\": true,\n  \"directAccessGrantsEnabled\": true,\n  \"standardFlowEnabled\": true,\n  \"redirectUris\": [\n    \"http://localhost:8000/auth/callback\"\n  ]\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Find client uuid",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kc_token}}"
+              }
+            ],
+            "url": "{{kc_base_url}}/admin/realms/master/clients?clientId=central-rbac"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.environment.set('rbac_client_uuid', pm.response.json()[0].id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Read client secret",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kc_token}}"
+              }
+            ],
+            "url": "{{kc_base_url}}/admin/realms/master/clients/{{rbac_client_uuid}}/client-secret"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.environment.set('rbac_client_secret', pm.response.json().value);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create role rbac-admin",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kc_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{kc_base_url}}/admin/realms/master/clients/{{rbac_client_uuid}}/roles",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"rbac-admin\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Read role rbac-admin",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kc_token}}"
+              }
+            ],
+            "url": "{{kc_base_url}}/admin/realms/master/clients/{{rbac_client_uuid}}/roles/rbac-admin"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.environment.set('rbac_role_id', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create operator user",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kc_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{kc_base_url}}/admin/realms/master/users",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"rbac-newman-op\",\n  \"enabled\": true,\n  \"email\": \"rbac-newman-op@example.com\",\n  \"emailVerified\": true,\n  \"firstName\": \"Newman\",\n  \"lastName\": \"Operator\",\n  \"credentials\": [\n    {\n      \"type\": \"password\",\n      \"value\": \"{{new_user_password}}\",\n      \"temporary\": false\n    }\n  ]\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Find operator id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kc_token}}"
+              }
+            ],
+            "url": "{{kc_base_url}}/admin/realms/master/users?username=rbac-newman-op&exact=true"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.environment.set('rbac_op_id', pm.response.json()[0].id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Grant rbac-admin to operator",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kc_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{kc_base_url}}/admin/realms/master/users/{{rbac_op_id}}/role-mappings/clients/{{rbac_client_uuid}}",
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  {\n    \"id\": \"{{rbac_role_id}}\",\n    \"name\": \"rbac-admin\"\n  }\n]"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Service account user",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kc_token}}"
+              }
+            ],
+            "url": "{{kc_base_url}}/admin/realms/master/clients/{{rbac_client_uuid}}/service-account-user"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.environment.set('rbac_sa_id', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Find staff-realm management client",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kc_token}}"
+              }
+            ],
+            "url": "{{kc_base_url}}/admin/realms/master/clients?clientId={{kc_realm}}-realm"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.environment.set('mgmt_client_uuid', pm.response.json()[0].id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List management roles",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kc_token}}"
+              }
+            ],
+            "url": "{{kc_base_url}}/admin/realms/master/clients/{{mgmt_client_uuid}}/roles?max=100"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const want=['manage-users','view-users','query-users','manage-clients','view-clients','query-clients','view-realm'];",
+                  "pm.environment.set('mgmt_roles', JSON.stringify(pm.response.json().filter(r=>want.includes(r.name)).map(r=>({id:r.id,name:r.name}))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Grant management roles to service account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kc_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{kc_base_url}}/admin/realms/master/users/{{rbac_sa_id}}/role-mappings/clients/{{mgmt_client_uuid}}",
+            "body": {
+              "mode": "raw",
+              "raw": "[]"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.request.body.raw = pm.environment.get('mgmt_roles');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Operator token (direct login)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{kc_base_url}}/realms/master/protocol/openid-connect/token",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "central-rbac"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{rbac_client_secret}}"
+                },
+                {
+                  "key": "username",
+                  "value": "rbac-newman-op"
+                },
+                {
+                  "key": "password",
+                  "value": "{{new_user_password}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.environment.set('rbac_token', pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "1. Service routes",
+      "item": [
+        {
+          "name": "Ping",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{rbac_base_url}}/ping"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unauthenticated is rejected",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{rbac_base_url}}/realms/list"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 401', () => pm.response.to.have.status(401));",
+                  "const j = pm.response.json();",
+                  "pm.test('error AUTH_REQUIRED', () => pm.expect(j.response_header.error_code).to.eql('AUTH_REQUIRED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Who am I",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{rbac_token}}"
+              }
+            ],
+            "url": "{{rbac_base_url}}/auth/me"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('envelope ok', () => pm.expect(j.response_header.status).to.eql('SUCCESS'));",
+                  "pm.test('has rbac-admin', () => pm.expect(JSON.stringify(j.response_body)).to.include('rbac-admin'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Register realm",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{rbac_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{rbac_base_url}}/realms/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{kc_realm}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('envelope ok', () => pm.expect(j.response_header.status).to.eql('SUCCESS'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List realms",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{rbac_token}}"
+              }
+            ],
+            "url": "{{rbac_base_url}}/realms/list"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('envelope ok', () => pm.expect(j.response_header.status).to.eql('SUCCESS'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create application",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{rbac_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{rbac_base_url}}/applications/create",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"realm\": \"{{kc_realm}}\",\n  \"mnemonic\": \"newman-app\",\n  \"description\": \"Created by the newman run\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('envelope ok', () => pm.expect(j.response_header.status).to.eql('SUCCESS'));",
+                  "pm.environment.set('app_id', j.response_body.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List applications",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{rbac_token}}"
+              }
+            ],
+            "url": "{{rbac_base_url}}/applications/list?realm={{kc_realm}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('envelope ok', () => pm.expect(j.response_header.status).to.eql('SUCCESS'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Set allow-list",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{rbac_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{rbac_base_url}}/applications/{{app_id}}/allow-list",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"permissions\": [\n    {\n      \"resource\": \"Farmer\",\n      \"action\": \"read\"\n    }\n  ]\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('envelope ok', () => pm.expect(j.response_header.status).to.eql('SUCCESS'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create role without admin API is recorded as failed",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{rbac_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{rbac_base_url}}/roles/create",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"application_id\": \"{{app_id}}\",\n  \"name\": \"newman-role\",\n  \"description\": \"x\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('role failed, no admin_api_url', () => { pm.expect(j.response_body.status).to.eql('failed'); pm.expect(j.response_body.error).to.include('admin_api_url'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List roles",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{rbac_token}}"
+              }
+            ],
+            "url": "{{rbac_base_url}}/roles/list?application_id={{app_id}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('envelope ok', () => pm.expect(j.response_header.status).to.eql('SUCCESS'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create user",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{rbac_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{rbac_base_url}}/users/create",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"realm\": \"{{kc_realm}}\",\n  \"username\": \"newman.user\",\n  \"email\": \"newman.user@example.com\",\n  \"first_name\": \"Newman\",\n  \"last_name\": \"User\",\n  \"send_invite\": false\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('envelope ok', () => pm.expect(j.response_header.status).to.eql('SUCCESS'));",
+                  "pm.environment.set('user_id', j.response_body.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List users",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{rbac_token}}"
+              }
+            ],
+            "url": "{{rbac_base_url}}/users/list?realm={{kc_realm}}&search=newman"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('envelope ok', () => pm.expect(j.response_header.status).to.eql('SUCCESS'));",
+                  "pm.test('user listed', () => pm.expect(JSON.stringify(j.response_body)).to.include('newman.user'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "User roles",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{rbac_token}}"
+              }
+            ],
+            "url": "{{rbac_base_url}}/users/{{user_id}}/roles?realm={{kc_realm}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('envelope ok', () => pm.expect(j.response_header.status).to.eql('SUCCESS'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Disable user",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{rbac_token}}"
+              }
+            ],
+            "url": "{{rbac_base_url}}/users/{{user_id}}/disable?realm={{kc_realm}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('envelope ok', () => pm.expect(j.response_header.status).to.eql('SUCCESS'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Enable user",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{rbac_token}}"
+              }
+            ],
+            "url": "{{rbac_base_url}}/users/{{user_id}}/enable?realm={{kc_realm}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('envelope ok', () => pm.expect(j.response_header.status).to.eql('SUCCESS'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sync status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{rbac_token}}"
+              }
+            ],
+            "url": "{{rbac_base_url}}/sync/status?realm={{kc_realm}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('envelope ok', () => pm.expect(j.response_header.status).to.eql('SUCCESS'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Disable application",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{rbac_token}}"
+              }
+            ],
+            "url": "{{rbac_base_url}}/applications/{{app_id}}/disable"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('envelope ok', () => pm.expect(j.response_header.status).to.eql('SUCCESS'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. Cleanup: remove everything the run created",
+      "item": [
+        {
+          "name": "Admin token",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{kc_base_url}}/realms/{{kc_admin_realm}}/protocol/openid-connect/token",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{kc_admin_client_id}}"
+                },
+                {
+                  "key": "username",
+                  "value": "{{kc_admin_user}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{kc_admin_password}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.environment.set('kc_token', pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Find the application's Keycloak client",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kc_token}}"
+              }
+            ],
+            "url": "{{kc_base_url}}/admin/realms/{{kc_realm}}/clients?clientId=newman-app"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const a=pm.response.json(); pm.environment.set('app_client_uuid', a.length?a[0].id:'');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete the application's Keycloak client",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kc_token}}"
+              }
+            ],
+            "url": "{{kc_base_url}}/admin/realms/{{kc_realm}}/clients/{{app_client_uuid}}"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if(!pm.environment.get('app_client_uuid')) pm.execution.skipRequest();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('deleted or absent', () => pm.expect([204,404]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Find the test user",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kc_token}}"
+              }
+            ],
+            "url": "{{kc_base_url}}/admin/realms/{{kc_realm}}/users?username=newman.user&exact=true"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const a=pm.response.json(); pm.environment.set('user_id', a.length?a[0].id:'');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete the test user",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kc_token}}"
+              }
+            ],
+            "url": "{{kc_base_url}}/admin/realms/{{kc_realm}}/users/{{user_id}}"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if(!pm.environment.get('user_id')) pm.execution.skipRequest();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('deleted', () => pm.expect([204,404]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete operator user",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kc_token}}"
+              }
+            ],
+            "url": "{{kc_base_url}}/admin/realms/master/users/{{rbac_op_id}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete client central-rbac",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kc_token}}"
+              }
+            ],
+            "url": "{{kc_base_url}}/admin/realms/master/clients/{{rbac_client_uuid}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "rbac_base_url",
+      "value": "http://localhost:8000"
+    }
+  ]
+}

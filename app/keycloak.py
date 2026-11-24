@@ -46,6 +46,9 @@ class Keycloak:
     async def list_client_roles(self, realm: str, client_uuid: str) -> list[dict]:
         return (await self.request("GET", f"/{realm}/clients/{client_uuid}/roles", params={"max": 1000})).json()
 
+    async def create_client_role(self, realm: str, client_uuid: str, name: str) -> None:
+        await self.request("POST", f"/{realm}/clients/{client_uuid}/roles", expect=(201, 409), json={"name": name})
+
     async def get_user(self, realm: str, user_id: str) -> dict:
         r = await self.request("GET", f"/{realm}/users/{user_id}", expect=(200, 404))
         if r.status_code == 404:

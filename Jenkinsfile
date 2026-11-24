@@ -11,8 +11,6 @@ pipeline {
         IMAGE_REGISTRY    = '379220350808.dkr.ecr.ap-south-1.amazonaws.com'
         ECR_REPO          = 'eoan/oan-identitygovernance-service/identitygovernance-service'
         RBAC_NAMESPACE    = 'identitygovernance'
-        // Keycloak of the oan_dev environment; the chart appends /realms/<realm>.
-        KEYCLOAK_BASE_URL = 'https://keycloak.development.oanstaging.com'
     }
 
     stages {

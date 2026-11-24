@@ -12,7 +12,6 @@ set -euo pipefail
 : "${KUBECONFIG:?KUBECONFIG is required (credential oan-dev-kubeconfig)}"
 : "${RBAC_NAMESPACE:?RBAC_NAMESPACE is required}"
 : "${IMMUTABLE_TAG:?IMMUTABLE_TAG is required}"
-: "${KEYCLOAK_BASE_URL:?KEYCLOAK_BASE_URL is required}"
 
 CHART=helm/oan-identitygovernance-service
 VALUES=helm/environments/dev/oan-identitygovernance-service.yaml
@@ -28,7 +27,6 @@ helm upgrade --install "${RELEASE}" "${CHART}" \
   --namespace "${NS}" --create-namespace \
   --values "${VALUES}" \
   --set image.tag="${IMMUTABLE_TAG}" \
-  --set global.keycloakBaseUrl="${KEYCLOAK_BASE_URL}" \
   --wait --timeout 10m
 
 kubectl -n "${NS}" rollout status "deployment/${RELEASE}-oan-identitygovernance-service" --timeout=5m
