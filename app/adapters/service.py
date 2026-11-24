@@ -3,9 +3,11 @@ import os
 
 import httpx
 
-from app.config import settings
+from app.config import Settings
 from app.envelope import RbacError
 from app.models import Application
+
+_config = Settings.get_config(strict=False)
 
 
 class ServiceAdapter:
@@ -26,7 +28,7 @@ class ServiceAdapter:
             if not token:
                 raise RbacError("NO_SERVICE_CREDENTIAL", f"Secret {app.admin_api_secret_ref} is not set", 500)
             headers["Authorization"] = f"Bearer {token}"
-        self._http = httpx.AsyncClient(base_url=app.admin_api_url.rstrip("/"), headers=headers, timeout=settings.http_timeout)
+        self._http = httpx.AsyncClient(base_url=app.admin_api_url.rstrip("/"), headers=headers, timeout=_config.http_timeout)
 
     async def _call(self, method: str, path: str, **kw) -> dict:
         try:

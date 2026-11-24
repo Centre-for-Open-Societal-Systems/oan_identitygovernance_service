@@ -44,16 +44,21 @@ spec:
           {{- if .Values.args }}
           args: {{- include "common.tplvalues.render" (dict "value" .Values.args "context" $) | nindent 12 }}
           {{- end }}
-          # DB_PASSWORD must precede DATABASE_URL so $(DB_PASSWORD) expands.
           env:
-            - name: DB_PASSWORD
+            - name: RBAC_DB_HOSTNAME
+              value: {{ .Values.global.postgresqlHost | quote }}
+            - name: RBAC_DB_PORT
+              value: {{ .Values.global.rbacDBPort | quote }}
+            - name: RBAC_DB_DBNAME
+              value: {{ tpl .Values.global.rbacDB $ | quote }}
+            - name: RBAC_DB_USERNAME
+              value: {{ tpl .Values.global.rbacDBUser $ | quote }}
+            - name: RBAC_DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ tpl .Values.global.rbacDBSecret $ | quote }}
                   key: {{ tpl .Values.global.rbacDBUserPasswordKey $ | quote }}
-            - name: DATABASE_URL
-              value: {{ printf "postgresql+asyncpg://%s:$(DB_PASSWORD)@%s:%v/%s" (tpl .Values.global.rbacDBUser $) .Values.global.postgresqlHost .Values.global.rbacDBPort (tpl .Values.global.rbacDB $) | quote }}
-            - name: KEYCLOAK_CLIENT_SECRET
+            - name: RBAC_KEYCLOAK_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.keycloakClient.existingSecret | quote }}

@@ -45,19 +45,19 @@ keycloakClient:
 
 # Rendered as container env vars; string values are passed through `tpl`.
 envVars:
-  KEYCLOAK_URL: '{{ tpl .Values.global.keycloakBaseUrl $ }}'
-  KEYCLOAK_ADMIN_REALM: master
-  KEYCLOAK_CLIENT_ID: '{{ .Values.keycloakClient.clientId }}'
-  AUTH_REALM: master
-  AUTH_CLIENT_ID: '{{ .Values.keycloakClient.clientId }}'
-  PUBLIC_URL: 'https://{{ .Values.global.hostname }}'
-  POST_LOGIN_URL: 'https://{{ .Values.global.hostname }}/'
-  COOKIE_SECURE: 'true'
-  ALLOWED_ORIGINS: '["https://{{ .Values.global.hostname }}"]'
+  RBAC_KEYCLOAK_URL: '{{ tpl .Values.global.keycloakBaseUrl $ }}'
+  RBAC_KEYCLOAK_ADMIN_REALM: master
+  RBAC_KEYCLOAK_CLIENT_ID: '{{ .Values.keycloakClient.clientId }}'
+  RBAC_AUTH_REALM: master
+  RBAC_AUTH_CLIENT_ID: '{{ .Values.keycloakClient.clientId }}'
+  RBAC_PUBLIC_URL: 'https://{{ .Values.global.hostname }}'
+  RBAC_POST_LOGIN_URL: 'https://{{ .Values.global.hostname }}/'
+  RBAC_COOKIE_SECURE: 'true'
+  RBAC_CORS_ALLOW_ORIGINS: '["https://{{ .Values.global.hostname }}"]'
   # Optional: accept the staff IAM access-token cookie too
-  IAM_ISSUER: ''
-  IAM_CLIENT_ID: ''
-  IAM_COOKIE_NAME: X-Access-Token
+  RBAC_IAM_ISSUER: ''
+  RBAC_IAM_CLIENT_ID: ''
+  RBAC_IAM_COOKIE_NAME: X-Access-Token
 
 # Extra env vars as raw valueFrom blocks, e.g. envVarsFrom.FOO: {secretKeyRef: {...}}
 envVarsFrom: {}
@@ -96,16 +96,16 @@ containerSecurityContext:
 
 startupProbe:
   enabled: true
-  httpGet: {path: /healthz, port: http}
+  httpGet: {path: /ping, port: http}
   periodSeconds: 5
   failureThreshold: 30
 livenessProbe:
   enabled: true
-  httpGet: {path: /healthz, port: http}
+  httpGet: {path: /ping, port: http}
   periodSeconds: 20
 readinessProbe:
   enabled: true
-  httpGet: {path: /healthz, port: http}
+  httpGet: {path: /ping, port: http}
   periodSeconds: 10
 
 nodeSelector: {}

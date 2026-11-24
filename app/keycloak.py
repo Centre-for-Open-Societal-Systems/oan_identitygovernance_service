@@ -4,13 +4,15 @@ from typing import Any
 
 import httpx
 
-from app.config import settings
+from app.config import Settings
 from app.envelope import RbacError
+
+_config = Settings.get_config(strict=False)
 
 
 class Keycloak:
     def __init__(self) -> None:
-        self._http = httpx.AsyncClient(base_url=settings.keycloak_url, timeout=settings.http_timeout)
+        self._http = httpx.AsyncClient(base_url=_config.keycloak_url, timeout=_config.http_timeout)
         self._token: str | None = None
         self._expires = 0.0
 
@@ -18,11 +20,11 @@ class Keycloak:
         if self._token and time.monotonic() < self._expires - 15:
             return self._token
         r = await self._http.post(
-            f"/realms/{settings.keycloak_admin_realm}/protocol/openid-connect/token",
+            f"/realms/{_config.keycloak_admin_realm}/protocol/openid-connect/token",
             data={
                 "grant_type": "client_credentials",
-                "client_id": settings.keycloak_client_id,
-                "client_secret": settings.keycloak_client_secret,
+                "client_id": _config.keycloak_client_id,
+                "client_secret": _config.keycloak_client_secret,
             },
         )
         if r.status_code != 200:

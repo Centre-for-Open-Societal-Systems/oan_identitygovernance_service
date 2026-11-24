@@ -1,8 +1,9 @@
 import uuid
 from datetime import datetime, timezone
 
+from openg2p_fastapi_common.models import BaseORMModel
 from sqlalchemy import JSON, DateTime, ForeignKey, String, Text, UniqueConstraint
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 
 def _id() -> str:
@@ -13,11 +14,7 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class Base(DeclarativeBase):
-    pass
-
-
-class Realm(Base):
+class Realm(BaseORMModel):
     __tablename__ = "realms"
 
     name: Mapped[str] = mapped_column(String(100), primary_key=True)
@@ -25,7 +22,7 @@ class Realm(Base):
     status: Mapped[str] = mapped_column(String(20), default="active")
 
 
-class Application(Base):
+class Application(BaseORMModel):
     __tablename__ = "applications"
     __table_args__ = (UniqueConstraint("realm", "mnemonic"),)
 
@@ -46,7 +43,7 @@ class Application(Base):
     roles: Mapped[list["Role"]] = relationship(back_populates="application")
 
 
-class Role(Base):
+class Role(BaseORMModel):
     __tablename__ = "roles"
     __table_args__ = (UniqueConstraint("application_id", "name"),)
 
@@ -63,7 +60,7 @@ class Role(Base):
     application: Mapped[Application] = relationship(back_populates="roles")
 
 
-class Permission(Base):
+class Permission(BaseORMModel):
     __tablename__ = "permissions"
     __table_args__ = (UniqueConstraint("application_id", "resource", "action"),)
 
@@ -75,14 +72,14 @@ class Permission(Base):
     description: Mapped[str | None] = mapped_column(Text)
 
 
-class RolePermission(Base):
+class RolePermission(BaseORMModel):
     __tablename__ = "role_permissions"
 
     role_id: Mapped[str] = mapped_column(ForeignKey("roles.id"), primary_key=True)
     permission_id: Mapped[str] = mapped_column(ForeignKey("permissions.id"), primary_key=True)
 
 
-class AllowedPermission(Base):
+class AllowedPermission(BaseORMModel):
     """Allow-list: the resources and actions the central RBAC may grant per application."""
 
     __tablename__ = "allowed_permissions"
@@ -94,7 +91,7 @@ class AllowedPermission(Base):
     action: Mapped[str] = mapped_column(String(50))
 
 
-class User(Base):
+class User(BaseORMModel):
     """Light copy of a Keycloak user. Never holds a password or token."""
 
     __tablename__ = "users"
@@ -110,14 +107,14 @@ class User(Base):
     location_codes: Mapped[list] = mapped_column(JSON, default=list)
 
 
-class UserRole(Base):
+class UserRole(BaseORMModel):
     __tablename__ = "user_roles"
 
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
     role_id: Mapped[str] = mapped_column(ForeignKey("roles.id"), primary_key=True)
 
 
-class AuditLog(Base):
+class AuditLog(BaseORMModel):
     __tablename__ = "audit_log"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
@@ -129,7 +126,7 @@ class AuditLog(Base):
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
-class SyncRun(Base):
+class SyncRun(BaseORMModel):
     __tablename__ = "sync_runs"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)

@@ -12,8 +12,10 @@ import jwt
 from fastapi import Depends, Request
 from fastapi.concurrency import run_in_threadpool
 
-from app.config import settings
+from app.config import Settings
 from app.envelope import RbacError
+
+_config = Settings.get_config(strict=False)
 
 ACCESS_COOKIE = "rbac_access"
 REFRESH_COOKIE = "rbac_refresh"
@@ -25,19 +27,19 @@ ADMIN, OPERATOR, VIEWER = "rbac-admin", "rbac-operator", "rbac-viewer"
 
 
 def realm_issuer(realm: str) -> str:
-    return f"{settings.keycloak_url}/realms/{realm}"
+    return f"{_config.keycloak_url}/realms/{realm}"
 
 
-DIRECT_ISSUER = realm_issuer(settings.auth_realm)
+DIRECT_ISSUER = realm_issuer(_config.auth_realm)
 
 # issuer -> (jwks client, accepted azp)
 _trusted: dict[str, tuple[jwt.PyJWKClient, str]] = {
-    DIRECT_ISSUER: (jwt.PyJWKClient(f"{DIRECT_ISSUER}/protocol/openid-connect/certs"), settings.auth_client_id)
+    DIRECT_ISSUER: (jwt.PyJWKClient(f"{DIRECT_ISSUER}/protocol/openid-connect/certs"), _config.auth_client_id)
 }
-if settings.iam_issuer:
-    _trusted[settings.iam_issuer] = (
-        jwt.PyJWKClient(f"{settings.iam_issuer.rstrip('/')}/protocol/openid-connect/certs"),
-        settings.iam_client_id,
+if _config.iam_issuer:
+    _trusted[_config.iam_issuer] = (
+        jwt.PyJWKClient(f"{_config.iam_issuer.rstrip('/')}/protocol/openid-connect/certs"),
+        _config.iam_client_id,
     )
 
 
@@ -57,7 +59,7 @@ def _extract(request: Request) -> tuple[str, str]:
         return bearer, "bearer"
     if tok := request.cookies.get(ACCESS_COOKIE):
         return tok, "cookie"
-    if settings.iam_issuer and (tok := request.cookies.get(settings.iam_cookie_name)):
+    if _config.iam_issuer and (tok := request.cookies.get(_config.iam_cookie_name)):
         return tok, "iam_cookie"
     raise RbacError("AUTH_REQUIRED", "Login required", 401)
 
@@ -69,7 +71,7 @@ def _check_csrf(request: Request) -> None:
     if request.headers.get(CSRF_HEADER) != CSRF_VALUE:
         raise RbacError("CSRF", f"Missing {CSRF_HEADER}: {CSRF_VALUE} header", 403)
     origin = request.headers.get("origin")
-    if origin and origin not in settings.allowed_origins:
+    if origin and origin not in _config.cors_allow_origins:
         raise RbacError("CSRF", "Origin not allowed", 403)
 
 
@@ -99,7 +101,7 @@ async def current_principal(request: Request) -> Principal:
     if source != "bearer":
         _check_csrf(request)
     claims = await run_in_threadpool(decode, token)
-    roles = set(claims.get("resource_access", {}).get(settings.auth_client_id, {}).get("roles", []))
+    roles = set(claims.get("resource_access", {}).get(_config.auth_client_id, {}).get("roles", []))
     return Principal(
         sub=claims["sub"], username=claims.get("preferred_username", claims["sub"]), roles=roles,
         email=claims.get("email"), name=claims.get("name"), source=source,

@@ -6,21 +6,23 @@ Design: `docs/central-rbac-system-design.md`. Earlier Frappe-based sections of `
 ## Run
 
     uv venv && uv pip install -e .
-    cp .env.example .env   # set KEYCLOAK_* values
-    uv run uvicorn app.main:app --reload
+    cp .env.example .env   # set RBAC_DB_* and RBAC_KEYCLOAK_* values
+    uv run python -m app.main run      # or: uv run uvicorn app.main:app --reload
 
-Tables are created on startup (SQLite by default; set `DATABASE_URL` for Postgres). Alembic comes next.
+Built on `openg2p-fastapi-common` (app setup, config, JSON logging, DB engine, base models, `/ping` health).
+Settings use the `RBAC_` prefix (`.env.example`). Tables are created on startup and by `python -m app.main migrate`
+(Postgres only). Alembic comes next.
 
 ## Login
 
 Direct (A2C-style, backend-for-frontend): `central-rbac` is a confidential client in realm `master`.
-Register `${PUBLIC_URL}/auth/callback` as its redirect URI. Flow: browser -> `GET /auth/login` -> Keycloak ->
+Register `${RBAC_PUBLIC_URL}/auth/callback` as its redirect URI. Flow: browser -> `GET /auth/login` -> Keycloak ->
 `GET /auth/callback` (backend exchanges the code with the client secret, PKCE) -> httpOnly cookies
-`rbac_access` / `rbac_refresh` -> redirect to `POST_LOGIN_URL`. Also `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/me`.
+`rbac_access` / `rbac_refresh` -> redirect to `RBAC_POST_LOGIN_URL`. Also `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/me`.
 
-Accepted credentials per call: `Authorization: Bearer`, the `rbac_access` cookie, or (when `IAM_ISSUER` is set)
+Accepted credentials per call: `Authorization: Bearer`, the `rbac_access` cookie, or (when `RBAC_IAM_ISSUER` is set)
 the staff IAM access-token cookie. Cookie-authenticated writes must send `X-Requested-With: central-rbac` and an
-`Origin` in `ALLOWED_ORIGINS`. Cookie name and role claim shape for the IAM route are unverified.
+`Origin` in `RBAC_CORS_ALLOW_ORIGINS`. Cookie name and role claim shape for the IAM route are unverified.
 
 ## Operator roles (client roles on `central-rbac`)
 
