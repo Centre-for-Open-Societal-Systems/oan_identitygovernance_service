@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.envelope import RbacError
 from app.keycloak import keycloak
-from app.models import Application, AuditLog, Role
+from app.models import Application, AuditLog
 
 
 async def get_app(db: AsyncSession, app_id: str) -> Application:
@@ -11,13 +11,6 @@ async def get_app(db: AsyncSession, app_id: str) -> Application:
     if not app:
         raise RbacError("APP_NOT_FOUND", "Application not found", 404)
     return app
-
-
-async def get_role(db: AsyncSession, role_id: str) -> Role:
-    role = await db.get(Role, role_id)
-    if not role:
-        raise RbacError("ROLE_NOT_FOUND", "Role not found", 404)
-    return role
 
 
 async def get_client(app: Application) -> dict:

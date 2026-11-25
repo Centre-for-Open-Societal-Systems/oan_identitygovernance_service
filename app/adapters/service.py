@@ -1,4 +1,4 @@
-"""Calls to a managed service's admin API. The service writes its own role to Keycloak."""
+"""Calls to a managed service's admin API. The service writes its own role to Keycloak as well."""
 import httpx
 
 from app.config import Settings
@@ -14,7 +14,7 @@ class ServiceAdapter:
     service prefix; a permission is a (doctype, right) pair, e.g. ("Farmer", "read"). Responses carry the payload in `data`.
 
     POST  /roles {role}                                  create
-    PATCH /roles/{role} {disabled}                       disable
+    DELETE /roles/{role}                                 delete
     GET   /permissions?role=                             rows with a 0/1 per right
     PUT   /permissions {role, doctype, permissions: {right: bool}}
 
@@ -46,8 +46,8 @@ class ServiceAdapter:
     async def create_role(self, name: str) -> None:
         await self.request("POST", "/roles", json={"role": name})
 
-    async def disable_role(self, name: str) -> None:
-        await self.request("PATCH", f"/roles/{name}", json={"disabled": True})
+    async def delete_role(self, name: str) -> None:
+        await self.request("DELETE", f"/roles/{name}")
 
     async def get_permissions(self, name: str) -> list[dict]:
         rows = (await self.request("GET", "/permissions", params={"role": name})).get("data") or []
