@@ -3,7 +3,8 @@
 //
 //  Every branch:  lint the chart.
 //  develop        -> build + push the image, package the chart with that image, deploy it to oan_dev
-//                    (ci/deploy-helm-dev.sh), then publish the chart to repository/develop of oan-helm.
+//                    (ci/deploy-helm-dev.sh), its APISIX route chart (ci/deploy-gateway.sh), then publish both
+//                    charts to repository/develop of oan-helm.
 //  staging        -> build + push the image only.
 //
 //  Tags:  <version of pyproject.toml>-<branch>.<build>, e.g. 0.0.0-develop.2 (= chart version), like oan_a2c.
@@ -112,6 +113,15 @@ pipeline {
             }
         }
 
+        // The route chart (apisix/k8s) is packaged and published like the app chart, with the version of the build.
+        stage('Package gateway chart') {
+            when { branch 'develop' }
+            steps {
+                sh 'python3 ci/package_chart.py gateway-package'
+                stash name: 'built-gateway-chart', includes: 'built-gateway-chart/**'
+            }
+        }
+
         stage('develop → oan_dev (helm)') {
             when { beforeAgent true; branch 'develop' }
             agent { label 'oan-ci-deploy' }   // VPN agent with helm and kubectl that reaches the oan_dev API
@@ -126,6 +136,21 @@ pipeline {
             }
         }
 
+        // The APISIX route of the public host (chart apisix/k8s), after the app deploy.
+        stage('develop → gateway (apisix)') {
+            when { beforeAgent true; branch 'develop' }
+            agent { label 'oan-ci-deploy' }
+            options { timeout(time: 15, unit: 'MINUTES') }
+            steps {
+                checkout scm
+                sh 'rm -rf built-gateway-chart'
+                unstash 'built-gateway-chart'
+                withCredentials([file(credentialsId: 'oan-dev-kubeconfig', variable: 'KUBECONFIG')]) {
+                    sh 'bash ci/deploy-gateway.sh'
+                }
+            }
+        }
+
         // Adds the archive built by 'Package chart' to repository/develop/ of oan-helm, only after the deploy succeeded.
         stage('Publish chart') {
             when { branch 'develop' }
@@ -134,6 +159,17 @@ pipeline {
                 catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE') {
                     withCredentials([usernamePassword(credentialsId: 'oan-helm-fork-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
                         sh 'python3 ci/package_chart.py publish'
+                    }
+                }
+            }
+        }
+
+        stage('Publish gateway chart') {
+            when { branch 'develop' }
+            steps {
+                catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE') {
+                    withCredentials([usernamePassword(credentialsId: 'oan-helm-fork-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
+                        sh 'python3 ci/package_chart.py gateway-publish'
                     }
                 }
             }

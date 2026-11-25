@@ -6,6 +6,9 @@ Run by the Jenkins stages "Resolve", "Package chart" and "Publish chart" of ever
                                <version of pyproject.toml>-develop.<BUILD_NUMBER>, e.g. 0.0.0-develop.2 (develop or staging)
     package_chart.py package   writes built-chart/oan-identitygovernance-service-<version>.tgz
     package_chart.py publish   adds that archive to repository/develop/ of oan-helm
+    package_chart.py gateway-package   writes built-gateway-chart/oan-identitygovernance-gateway-<version>.tgz, the route
+                               chart of apisix/k8s, with the version of the build
+    package_chart.py gateway-publish   adds that archive to repository/develop/ of oan-helm
 
 The Chart.yaml annotations and the publisher come from scripts/ci of oan-helm, so this chart is listed like the other
 charts. The version is 0.0.0-develop.N, which publish_chart.py sends to repository/develop/. The dependencies
@@ -31,10 +34,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CHART = "oan-identitygovernance-service"
+GATEWAY_CHART = "oan-identitygovernance-gateway"
 OAN_HELM_SLUG = "Centre-for-Open-Societal-Systems/oan-helm"
 OAN_HELM = "https://github.com/%s.git" % OAN_HELM_SLUG
 ALREADY_PUBLISHED = 4
 OUTPUT = ROOT / "built-chart"
+GATEWAY_OUTPUT = ROOT / "built-gateway-chart"
 RELEASE = "identitygovernance"
 
 
@@ -120,7 +125,35 @@ def package_build(env, work):
     return 0
 
 
-def published_commit(env, name):
+def gateway_package_build(env, work):
+    """apisix/k8s as a chart of its own: the route, versioned like the app chart and annotated with this commit."""
+    generic = load_generic(work)
+    version = chart_version(env)
+    chart = work / GATEWAY_CHART
+    shutil.copytree(str(ROOT / "apisix" / "k8s"), str(chart))
+    metadata = chart / "Chart.yaml"
+    metadata.write_text(
+        generic.annotate(
+            metadata.read_text(encoding="utf-8"),
+            {
+                "oan.org/source-repository": "Centre-for-Open-Societal-Systems/oan_identitygovernance_service",
+                "oan.org/source-commit": env["SOURCE_COMMIT"],
+                "oan.org/source-subject": env.get("COMMIT_SUBJECT", "")[:200],
+                "oan.org/release-name": "identitygovernance-gateway",
+                "oan.org/release-namespace": RELEASE,
+                "oan.org/values-overlay": "helm/environments/%s/oan-identitygovernance-gateway.yaml" % deploy_env(env),
+            },
+        ),
+        encoding="utf-8",
+    )
+    shutil.rmtree(str(GATEWAY_OUTPUT), ignore_errors=True)
+    GATEWAY_OUTPUT.mkdir()
+    run(["helm", "package", str(chart), "--version", version, "--destination", str(GATEWAY_OUTPUT)])
+    print("packaged %s-%s.tgz" % (GATEWAY_CHART, version))
+    return 0
+
+
+def published_commit(env, name, chart=CHART):
     """oan.org/source-commit of the archive already in repository/<channel>/ of oan-helm, or None."""
     request = urllib.request.Request(
         "https://api.github.com/repos/%s/contents/repository/%s/%s" % (OAN_HELM_SLUG, env["BRANCH_NAME"], name),
@@ -130,25 +163,25 @@ def published_commit(env, name):
         with urllib.request.urlopen(request) as response:
             data = response.read()
         with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
-            text = archive.extractfile("%s/Chart.yaml" % CHART).read().decode("utf-8")
+            text = archive.extractfile("%s/Chart.yaml" % chart).read().decode("utf-8")
     except (OSError, KeyError, tarfile.TarError):
         return None
     match = re.search(r"oan\.org/source-commit: *\"?([0-9a-f]{7,40})", text)
     return match.group(1) if match else None
 
 
-def publish_build(env, work):
+def publish_build(env, work, output=OUTPUT, chart=CHART):
     if env.get("DRY_RUN") != "1" and not env.get("GH_TOKEN"):
         print("FAIL: no GitHub credential: the chart was not published.")
         return 3
-    archives = sorted(OUTPUT.glob("*.tgz"))
+    archives = sorted(output.glob("*.tgz"))
     if len(archives) != 1:
-        raise ValueError("expected the one archive of this build in %s" % OUTPUT)
+        raise ValueError("expected the one archive of this build in %s" % output)
     scripts = fetch_publisher(work)
     result = subprocess.run([sys.executable, str(scripts / "publish_chart.py"), str(archives[0])], env=env)
     if result.returncode == ALREADY_PUBLISHED:
         # Build numbers can repeat (job recreated), so a taken version is only fine if it holds this commit.
-        if published_commit(env, archives[0].name) == env["SOURCE_COMMIT"]:
+        if published_commit(env, archives[0].name, chart) == env["SOURCE_COMMIT"]:
             print("%s was published by an earlier run of this commit." % archives[0].name)
             return 0
         print("FAIL: %s is already published for another commit; the chart was not published." % archives[0].name)
@@ -156,12 +189,22 @@ def publish_build(env, work):
     return result.returncode
 
 
+def gateway_publish_build(env, work):
+    return publish_build(env, work, GATEWAY_OUTPUT, GATEWAY_CHART)
+
+
 def main(argv=None, env=None):
     argv = sys.argv[1:] if argv is None else argv
     env = dict(os.environ if env is None else env)
-    actions = {"version": version_build, "package": package_build, "publish": publish_build}
+    actions = {
+        "version": version_build,
+        "package": package_build,
+        "publish": publish_build,
+        "gateway-package": gateway_package_build,
+        "gateway-publish": gateway_publish_build,
+    }
     if len(argv) != 1 or argv[0] not in actions:
-        print("usage: package_chart.py version|package|publish")
+        print("usage: package_chart.py version|package|publish|gateway-package|gateway-publish")
         return 1
     work = Path(tempfile.mkdtemp(prefix="rbac-chart-"))
     try:
