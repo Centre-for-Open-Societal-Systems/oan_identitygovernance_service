@@ -33,6 +33,8 @@ image:
   pullSecrets: []
 
 replicaCount: 1
+strategy:
+  type: Recreate
 containerPort: 8000
 
 # The Keycloak client `central-rbac` is registered by hand in the master realm
