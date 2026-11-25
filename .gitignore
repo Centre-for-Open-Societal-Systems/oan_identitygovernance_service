@@ -225,3 +225,6 @@ __marimo__/
 # Local
 *.db
 helm/*/charts/
+
+# Chart archive of a build (ci/package_chart.py)
+built-chart/

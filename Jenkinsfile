@@ -1,3 +1,16 @@
+// =============================================================================
+//  Jenkinsfile - oan-identitygovernance-service (central RBAC)
+//
+//  Every branch:  lint the chart.
+//  develop        -> build + push the image, package the chart with that image, deploy it to oan_dev
+//                    (ci/deploy-helm-dev.sh), then publish the chart to repository/develop of oan-helm.
+//  staging        -> build + push the image only.
+//
+//  Tags:  <version of pyproject.toml>-<branch>.<build>, e.g. 0.0.0-develop.2 (= chart version), like oan_a2c.
+//  Credentials: aws-ecr-creds (ECR push), oan-dev-kubeconfig (file; the deployer ServiceAccount, which needs
+//               the namespace in deployNamespaces of oan-helm's cluster-access values), oan-helm-fork-token
+//               (publishing the chart).
+// =============================================================================
 pipeline {
     agent any
 
@@ -11,17 +24,22 @@ pipeline {
         IMAGE_REGISTRY    = '379220350808.dkr.ecr.ap-south-1.amazonaws.com'
         ECR_REPO          = 'eoan/oan-identitygovernance-service/identitygovernance-service'
         RBAC_NAMESPACE    = 'identitygovernance'
+        CHART_NAME        = 'oan-identitygovernance-service'
     }
 
     stages {
 
-        stage('Checkout') {
+        stage('Resolve') {
             steps {
                 checkout scm
                 script {
-                    def sha = sh(returnStdout: true, script: 'git rev-parse --short=7 HEAD').trim()
-                    env.IMMUTABLE_TAG = "${env.BRANCH_NAME}-${env.BUILD_NUMBER}-${sha}"
-                    env.FULL_IMAGE    = "${env.IMAGE_REGISTRY}/${env.ECR_REPO}:${env.IMMUTABLE_TAG}"
+                    // develop and staging: tag = chart version = <version>-<branch>.<build> (ci/package_chart.py version).
+                    env.IMMUTABLE_TAG = "${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
+                    if (env.BRANCH_NAME == 'develop' || env.BRANCH_NAME == 'staging') {
+                        env.IMMUTABLE_TAG = sh(returnStdout: true, script: 'python3 ci/package_chart.py version').trim()
+                    }
+                    env.MOVING_TAG = "${env.BRANCH_NAME}-latest"
+                    env.FULL_IMAGE = "${env.IMAGE_REGISTRY}/${env.ECR_REPO}:${env.IMMUTABLE_TAG}"
                     echo "Branch ${env.BRANCH_NAME} -> tag ${env.IMMUTABLE_TAG}, image ${env.FULL_IMAGE}"
                 }
             }
@@ -44,7 +62,7 @@ pipeline {
                 sh '''
                     DOCKER_BUILDKIT=1 docker build \
                         -t "$FULL_IMAGE" \
-                        -t "$IMAGE_REGISTRY/$ECR_REPO:develop" \
+                        -t "$IMAGE_REGISTRY/$ECR_REPO:$MOVING_TAG" \
                         .
                     # Never push an image that cannot import the app
                     docker run --rm "$FULL_IMAGE" python -c "import app.main"
@@ -69,15 +87,28 @@ pipeline {
                             || aws ecr create-repository --region "$AWS_REGION" --repository-name "$ECR_REPO" >/dev/null
 
                         docker push "$FULL_IMAGE"
-                        if [ "${BRANCH_NAME}" = "develop" ]; then
-                            docker push "$IMAGE_REGISTRY/$ECR_REPO:develop"
-                            docker rmi "$FULL_IMAGE" "$IMAGE_REGISTRY/$ECR_REPO:develop" || true
-                        else
-                            docker rmi "$FULL_IMAGE" || true
-                        fi
+                        docker push "$IMAGE_REGISTRY/$ECR_REPO:$MOVING_TAG"   # same digest -> ECR dedups
+                        docker rmi "$FULL_IMAGE" "$IMAGE_REGISTRY/$ECR_REPO:$MOVING_TAG" || true
                         echo "Pushed image for ${BRANCH_NAME}"
                     '''
                 }
+            }
+        }
+
+        // The chart with this build's image in its values; the deploy installs this archive and
+        // the same archive is published to oan-helm afterwards.
+        stage('Package chart') {
+            when { branch 'develop' }
+            steps {
+                script {
+                    env.IMAGE_TAG = env.IMMUTABLE_TAG
+                    env.SOURCE_COMMIT = sh(returnStdout: true, script: 'git rev-parse --verify HEAD').trim()
+                    env.COMMIT_SUBJECT = sh(returnStdout: true, script: 'git log -1 --pretty=%s').trim()
+                    env.IMAGE_REPOSITORY = env.ECR_REPO   // registry is a separate value of the chart
+                }
+                sh 'python3 ci/package_chart.py package'
+                // The deploy stage runs on the VPN deploy agent, which gets the archive from here.
+                stash name: 'built-chart', includes: 'built-chart/**'
             }
         }
 
@@ -87,8 +118,23 @@ pipeline {
             options { timeout(time: 20, unit: 'MINUTES') }
             steps {
                 checkout scm
+                sh 'rm -rf built-chart'
+                unstash 'built-chart'
                 withCredentials([file(credentialsId: 'oan-dev-kubeconfig', variable: 'KUBECONFIG')]) {
                     sh 'bash ci/deploy-helm-dev.sh'
+                }
+            }
+        }
+
+        // Adds the archive built by 'Package chart' to repository/develop/ of oan-helm, only after the deploy succeeded.
+        stage('Publish chart') {
+            when { branch 'develop' }
+            steps {
+                // UNSTABLE, not failed: the image is already deployed.
+                catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE') {
+                    withCredentials([usernamePassword(credentialsId: 'oan-helm-fork-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
+                        sh 'python3 ci/package_chart.py publish'
+                    }
                 }
             }
         }
