@@ -1,76 +1,70 @@
 from fastapi import Depends
 from openg2p_fastapi_common.controller import BaseController
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
 from app.adapters.service import ServiceAdapter
-from app.auth import ADMIN, OPERATOR, VIEWER, Principal, require
+from app.auth import OPERATOR, VIEWER, Principal, require
 from app.config import Settings
 from app.db import get_session
 from app.envelope import RbacError, ok
 from app.keycloak import keycloak
-from app.models import AllowedPermission, Application, Realm
 from app.schemas import ApplicationCreatedOut, ApplicationOut, RoleOut
-from app.services.common import audit, get_app, get_client
+from app.services.common import MANAGED_ATTRIBUTE, audit, check_realm, get_app, managed_clients
 
 _config = Settings.get_config(strict=False)
 CENTRAL_ADMIN_ROLE = "OAN Administrator"
 
 
 class CatalogueController(BaseController):
+    """An application is a Keycloak client of one service: RBAC marks it as managed and keeps the service's admin
+    API URL as its root URL. Its roles are the client's roles; their permissions live in the service. Nothing about
+    either is stored here."""
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.router.tags += ["catalogue"]
         self.router.add_api_route("/realms/list", self.list_realms, methods=["GET"])
-        self.router.add_api_route("/realms/register", self.register_realm, methods=["POST"])
         self.router.add_api_route("/applications/create", self.create_application, methods=["POST"])
         self.router.add_api_route("/applications/list", self.list_applications, methods=["GET"])
-        self.router.add_api_route("/applications/{app_id}/disable", self.disable_application, methods=["POST"])
-        self.router.add_api_route("/applications/{app_id}/allow-list", self.set_allow_list, methods=["PUT"])
-        # Roles are the Keycloak client roles of the application, named in the path; nothing about them is stored.
-        self.router.add_api_route("/applications/{app_id}/roles/list", self.list_roles, methods=["GET"])
-        self.router.add_api_route("/applications/{app_id}/roles/create", self.create_role, methods=["POST"])
-        self.router.add_api_route("/applications/{app_id}/roles/{name}/delete", self.delete_role, methods=["POST"])
-        self.router.add_api_route("/applications/{app_id}/roles/{name}/permissions", self.get_role_permissions, methods=["GET"])
-        self.router.add_api_route("/applications/{app_id}/roles/{name}/permissions", self.set_role_permissions, methods=["POST"])
+        self.router.add_api_route("/applications/{realm}/{client_id}/disable", self.disable_application, methods=["POST"])
+        self.router.add_api_route("/applications/{realm}/{client_id}/roles/list", self.list_roles, methods=["GET"])
+        self.router.add_api_route("/applications/{realm}/{client_id}/roles/create", self.create_role, methods=["POST"])
+        self.router.add_api_route("/applications/{realm}/{client_id}/roles/{name}/delete", self.delete_role, methods=["POST"])
+        self.router.add_api_route("/applications/{realm}/{client_id}/roles/{name}/permissions", self.get_role_permissions, methods=["GET"])
+        self.router.add_api_route("/applications/{realm}/{client_id}/roles/{name}/permissions", self.set_role_permissions, methods=["POST"])
 
     # --- realms ---------------------------------------------------------------
-    async def list_realms(self, db: AsyncSession = Depends(get_session), _: Principal = Depends(require(VIEWER, OPERATOR))):
-        return ok([{"name": r.name, "status": r.status} for r in await db.scalars(select(Realm))])
-
-    async def register_realm(self, body: schemas.RealmIn, db: AsyncSession = Depends(get_session), p: Principal = Depends(require(ADMIN))):
-        if await db.get(Realm, body.name):
-            raise RbacError("REALM_EXISTS", "Realm already registered", 409)
-        db.add(Realm(name=body.name))
-        audit(db, p.username, "realm.register", body.name)
-        await db.commit()
-        return ok({"name": body.name})
+    async def list_realms(self, _: Principal = Depends(require(VIEWER, OPERATOR))):
+        """The realms RBAC manages: the `managed_realms` setting."""
+        return ok([{"name": r} for r in _config.managed_realms])
 
     # --- applications -----------------------------------------------------------
     async def create_application(self, body: schemas.ApplicationIn, db: AsyncSession = Depends(get_session), p: Principal = Depends(require(OPERATOR))):
-        """Section 3.1. The client secret is returned once and never stored."""
-        if not await db.get(Realm, body.realm):
-            raise RbacError("REALM_NOT_FOUND", f"Realm {body.realm} is not registered", 404)
-        dup = await db.scalar(select(Application).where(Application.realm == body.realm, Application.mnemonic == body.mnemonic))
-        if dup:
+        """Section 3.1. Creates the service's client, or takes over an existing one: marks it as managed and sets its
+        root URL to the admin API. The root URL also resolves the client's relative redirect URIs, so a client people
+        log in through must not be registered. The client secret is returned once and never stored."""
+        check_realm(body.realm)
+        existing = await keycloak.find_client(body.realm, body.client_id)
+        if existing and (existing.get("attributes") or {}).get(MANAGED_ATTRIBUTE) == "true":
             raise RbacError("APP_EXISTS", "Application already registered in this realm", 409)
 
-        # Keycloak first; it is idempotent (an existing client is reused), so a failed commit below can be retried.
-        r = await keycloak.request(
-            "POST", f"/{body.realm}/clients", expect=(201, 409),
-            json={
-                "clientId": body.mnemonic, "description": body.description or "", "enabled": True,
-                "publicClient": False, "serviceAccountsEnabled": True, "standardFlowEnabled": False,
-            },
-        )
-        if r.status_code == 201:
-            client_uuid = r.headers["Location"].rsplit("/", 1)[1]
-        else:
-            existing = await keycloak.find_client(body.realm, body.mnemonic)
-            if not existing:
-                raise RbacError("KEYCLOAK_ERROR", "Client reported as existing but not found", 502)
+        if existing:
             client_uuid = existing["id"]
+            rep = {**existing, "rootUrl": body.admin_api_url, "attributes": {**(existing.get("attributes") or {}), MANAGED_ATTRIBUTE: "true"}}
+            if body.description is not None:
+                rep["description"] = body.description
+            await keycloak.request("PUT", f"/{body.realm}/clients/{client_uuid}", json=rep)
+        else:
+            r = await keycloak.request(
+                "POST", f"/{body.realm}/clients", expect=(201,),
+                json={
+                    "clientId": body.client_id, "description": body.description or "", "enabled": True,
+                    "publicClient": False, "serviceAccountsEnabled": True, "standardFlowEnabled": False,
+                    "rootUrl": body.admin_api_url, "attributes": {MANAGED_ATTRIBUTE: "true"},
+                },
+            )
+            client_uuid = r.headers["Location"].rsplit("/", 1)[1]
         # A public client (an existing one may be) has no secret.
         secret = (await keycloak.request("GET", f"/{body.realm}/clients/{client_uuid}/client-secret")).json().get("value")
 
@@ -81,99 +75,69 @@ class CatalogueController(BaseController):
             role = next(r for r in await keycloak.list_client_roles(body.realm, client_uuid) if r["name"] == CENTRAL_ADMIN_ROLE)
             await keycloak.add_client_roles(body.realm, p.sub, client_uuid, [role])
 
-        app = Application(realm=body.realm, mnemonic=body.mnemonic, admin_api_url=body.admin_api_url)
-        db.add(app)
-        audit(db, p.username, "application.create", f"{app.realm}/{app.mnemonic}", after={"client": client_uuid})
+        audit(db, p.username, "application.create", f"{body.realm}/{body.client_id}", after={"admin_api_url": body.admin_api_url})
         await db.commit()
-        client = {"description": body.description, "enabled": True}
-        return ok(ApplicationCreatedOut(**ApplicationOut.of(app, client).model_dump(), client_secret=secret))
+        client = await get_app(body.realm, body.client_id)
+        return ok(ApplicationCreatedOut(**ApplicationOut.of(body.realm, client).model_dump(), client_secret=secret))
 
-    async def list_applications(self, realm: str | None = None, db: AsyncSession = Depends(get_session), _: Principal = Depends(require(VIEWER, OPERATOR))):
-        q = select(Application)
-        if realm:
-            q = q.where(Application.realm == realm)
-        rows = list(await db.scalars(q))
-        clients = {}
-        for r in {a.realm for a in rows}:
-            clients[r] = {c["clientId"]: c for c in (await keycloak.request("GET", f"/{r}/clients", params={"max": 1000})).json()}
-        return ok([ApplicationOut.of(a, clients[a.realm].get(a.mnemonic)) for a in rows])
+    async def list_applications(self, realm: str | None = None, _: Principal = Depends(require(VIEWER, OPERATOR))):
+        realms = [check_realm(realm)] if realm else _config.managed_realms
+        return ok([ApplicationOut.of(r, c) for r in realms for c in await managed_clients(r)])
 
-    async def disable_application(self, app_id: str, db: AsyncSession = Depends(get_session), p: Principal = Depends(require(OPERATOR))):
+    async def disable_application(self, realm: str, client_id: str, db: AsyncSession = Depends(get_session), p: Principal = Depends(require(OPERATOR))):
         """Disabling the Keycloak client is the enforcement: no token can be issued for it."""
-        app = await get_app(db, app_id)
-        client = await get_client(app)
-        await keycloak.request("PUT", f"/{app.realm}/clients/{client['id']}", json={"enabled": False})
-        audit(db, p.username, "application.disable", f"{app.realm}/{app.mnemonic}", before={"enabled": client.get("enabled", True)}, after={"enabled": False})
+        client = await get_app(realm, client_id)
+        await keycloak.request("PUT", f"/{realm}/clients/{client['id']}", json={**client, "enabled": False})
+        audit(db, p.username, "application.disable", f"{realm}/{client_id}", before={"enabled": client.get("enabled", True)}, after={"enabled": False})
         await db.commit()
-        return ok(ApplicationOut.of(app, {**client, "enabled": False}))
-
-    async def set_allow_list(self, app_id: str, body: schemas.AllowListIn, db: AsyncSession = Depends(get_session), p: Principal = Depends(require(ADMIN))):
-        app = await get_app(db, app_id)
-        for row in await db.scalars(select(AllowedPermission).where(AllowedPermission.application_id == app.id)):
-            await db.delete(row)
-        for pair in {(x.resource, x.action) for x in body.permissions}:
-            db.add(AllowedPermission(application_id=app.id, resource=pair[0], action=pair[1]))
-        audit(db, p.username, "allow_list.set", f"{app.realm}/{app.mnemonic}", after={"count": len(body.permissions)})
-        await db.commit()
-        return ok({"count": len(body.permissions)})
+        return ok(ApplicationOut.of(realm, {**client, "enabled": False}))
 
     # --- roles ------------------------------------------------------------------
-    async def list_roles(self, app_id: str, db: AsyncSession = Depends(get_session), _: Principal = Depends(require(VIEWER, OPERATOR))):
+    async def list_roles(self, realm: str, client_id: str, _: Principal = Depends(require(VIEWER, OPERATOR))):
         """The client roles of the application in Keycloak, whoever created them."""
-        app = await get_app(db, app_id)
-        reps = await keycloak.list_client_roles(app.realm, (await get_client(app))["id"])
-        return ok([RoleOut(application_id=app.id, name=r["name"], description=r.get("description")) for r in reps])
+        client = await get_app(realm, client_id)
+        reps = await keycloak.list_client_roles(realm, client["id"])
+        return ok([RoleOut(client_id=client_id, name=r["name"], description=r.get("description")) for r in reps])
 
-    async def create_role(self, app_id: str, body: schemas.RoleIn, db: AsyncSession = Depends(get_session), p: Principal = Depends(require(OPERATOR))):
+    async def create_role(self, realm: str, client_id: str, body: schemas.RoleIn, db: AsyncSession = Depends(get_session), p: Principal = Depends(require(OPERATOR))):
         """Section 3.2: the service creates the role and its Keycloak client role; the result is read back from Keycloak."""
-        app = await get_app(db, app_id)
-        client = await get_client(app)
+        client = await get_app(realm, client_id)
         if not client.get("enabled", True):
             raise RbacError("APP_NOT_ACTIVE", "Application is disabled in Keycloak", 409)
-        async with ServiceAdapter(app, p.token) as svc:
+        async with ServiceAdapter(client, p.token) as svc:
             await svc.create_role(body.name)
-        audit(db, p.username, "role.create", f"{app.mnemonic}/{body.name}")
+        audit(db, p.username, "role.create", f"{realm}/{client_id}/{body.name}")
         await db.commit()
-        rep = next((r for r in await keycloak.list_client_roles(app.realm, client["id"]) if r["name"] == body.name), None)
+        rep = next((r for r in await keycloak.list_client_roles(realm, client["id"]) if r["name"] == body.name), None)
         if not rep:
             raise RbacError(
                 "KEYCLOAK_ROLE_MISSING",
-                f"{app.mnemonic} created {body.name} but not in its Keycloak client; set admin_client_id and "
+                f"{client_id} created {body.name} but not in its Keycloak client; set admin_client_id and "
                 "admin_client_secret on the service's login option",
                 502,
             )
-        return ok(RoleOut(application_id=app.id, name=rep["name"], description=rep.get("description")))
+        return ok(RoleOut(client_id=client_id, name=rep["name"], description=rep.get("description")))
 
-    async def delete_role(self, app_id: str, name: str, db: AsyncSession = Depends(get_session), p: Principal = Depends(require(OPERATOR))):
+    async def delete_role(self, realm: str, client_id: str, name: str, db: AsyncSession = Depends(get_session), p: Principal = Depends(require(OPERATOR))):
         """The service deletes the role and its Keycloak client role."""
-        app = await get_app(db, app_id)
-        async with ServiceAdapter(app, p.token) as svc:
+        async with ServiceAdapter(await get_app(realm, client_id), p.token) as svc:
             await svc.delete_role(name)
-        audit(db, p.username, "role.delete", f"{app.mnemonic}/{name}")
+        audit(db, p.username, "role.delete", f"{realm}/{client_id}/{name}")
         await db.commit()
-        return ok({"application_id": app.id, "name": name})
+        return ok({"client_id": client_id, "name": name})
 
-    async def get_role_permissions(self, app_id: str, name: str, db: AsyncSession = Depends(get_session), p: Principal = Depends(require(VIEWER, OPERATOR))):
+    async def get_role_permissions(self, realm: str, client_id: str, name: str, p: Principal = Depends(require(VIEWER, OPERATOR))):
         """Read live from the managed service."""
-        async with ServiceAdapter(await get_app(db, app_id), p.token) as svc:
+        async with ServiceAdapter(await get_app(realm, client_id), p.token) as svc:
             return ok(await svc.get_permissions(name))
 
-    async def set_role_permissions(self, app_id: str, name: str, body: schemas.RolePermissionsIn, db: AsyncSession = Depends(get_session), p: Principal = Depends(require(OPERATOR))):
-        """Section 3.3: validate against the allow-list, then push to the service (the service is the source of truth)."""
-        app = await get_app(db, app_id)
-        allowed = {
-            (a.resource, a.action)
-            for a in (await db.scalars(select(AllowedPermission).where(AllowedPermission.application_id == app.id)))
-        }
-        wanted = {(x.resource, x.action) for x in body.permissions}
-        rejected = sorted(wanted - allowed)
-        if rejected:
-            raise RbacError("NOT_ALLOWED", f"Not in the allow-list for {app.mnemonic}: {rejected}", 422)
-
-        pairs = [{"resource": r, "action": a} for r, a in sorted(wanted)]
-        async with ServiceAdapter(app, p.token) as svc:
+    async def set_role_permissions(self, realm: str, client_id: str, name: str, body: schemas.RolePermissionsIn, db: AsyncSession = Depends(get_session), p: Principal = Depends(require(OPERATOR))):
+        """Section 3.3: the service decides what may be granted and is the source of truth for what is."""
+        pairs = sorted({(x.resource, x.action) for x in body.permissions})
+        wanted = [{"resource": r, "action": a} for r, a in pairs]
+        async with ServiceAdapter(await get_app(realm, client_id), p.token) as svc:
             before = await svc.get_permissions(name)
-            await svc.set_permissions(name, pairs)
-        audit(db, p.username, "role.permissions.set", f"{app.mnemonic}/{name}", before={"count": len(before)}, after={"permissions": sorted(wanted)})
+            await svc.set_permissions(name, wanted)
+        audit(db, p.username, "role.permissions.set", f"{realm}/{client_id}/{name}", before={"count": len(before)}, after={"permissions": pairs})
         await db.commit()
-        return ok(pairs)
+        return ok(wanted)

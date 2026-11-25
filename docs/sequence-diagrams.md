@@ -53,16 +53,18 @@ sequenceDiagram
     participant DB as RBAC database
     participant KC as Keycloak
 
-    Op->>RBAC: POST /applications/create {realm, mnemonic, admin_api_url}
-    RBAC->>KC: create client (id = mnemonic, service account on)
-    alt client already exists
-        RBAC->>KC: find client by id
+    Op->>RBAC: POST /applications/create {realm, client_id, admin_api_url}
+    RBAC->>RBAC: realm in managed_realms?
+    alt client does not exist
+        RBAC->>KC: create client (service account on, rootUrl = admin_api_url, rbac.managed = true)
+    else client exists
+        RBAC->>KC: set rootUrl = admin_api_url and rbac.managed = true on it
     end
     RBAC->>KC: read client secret (none for a public client)
     RBAC->>KC: create client role OAN Administrator, grant it to the operator (sub)
-    RBAC->>DB: insert application, audit row
+    RBAC->>DB: audit row
     RBAC-->>Op: application + client secret (shown once)
-    Note over RBAC,KC: The client's roles are not copied: they are listed live from Keycloak<br/>(GET /applications/{app_id}/roles/list).
+    Note over RBAC,KC: One client per service. The application is the client itself: nothing about it<br/>is stored here. Its roles are listed live (GET /applications/{realm}/{client_id}/roles/list).
 ```
 
 ## 4. Create a role in a managed service
@@ -75,8 +77,8 @@ sequenceDiagram
     participant KC as Keycloak
     participant SV as Auth service
 
-    Op->>RBAC: POST /applications/{app_id}/roles/create {name}
-    RBAC->>KC: is the application's client enabled?
+    Op->>RBAC: POST /applications/{realm}/{client_id}/roles/create {name}
+    RBAC->>KC: the client: managed, enabled, rootUrl (the admin API)
     RBAC->>SV: POST /roles {role} (operator's token)
     SV->>SV: create the Frappe role
     SV->>KC: create the client role of the same name (its login option's admin client)
@@ -98,22 +100,24 @@ sequenceDiagram
     actor Op as Operator
     participant RBAC
     participant DB as RBAC database
+    participant KC as Keycloak
     participant SV as Auth service
 
-    Op->>RBAC: POST /applications/{app_id}/roles/{name}/permissions {permissions: [{resource, action}]}
-    RBAC->>DB: load the application's allow-list
-    alt a pair is not in the allow-list
-        RBAC-->>Op: 422 NOT_ALLOWED
-    else all allowed
-        RBAC->>SV: GET /permissions?role=
-        SV-->>RBAC: current rows (doctype, rights)
-        loop each doctype held today or wanted
-            RBAC->>SV: PUT /permissions {role, doctype, permissions: {right: true/false}}
-        end
+    Op->>RBAC: POST /applications/{realm}/{client_id}/roles/{name}/permissions {permissions: [{resource, action}]}
+    RBAC->>KC: the client's rootUrl (the admin API)
+    RBAC->>SV: GET /permissions?role=
+    SV-->>RBAC: current rows (doctype, rights)
+    loop each doctype held today or wanted
+        RBAC->>SV: PUT /permissions {role, doctype, permissions: {right: true/false}}
+    end
+    alt the service refuses a doctype or right
+        SV-->>RBAC: 4xx
+        RBAC-->>Op: 502 SERVICE_ERROR with the service's answer
+    else
         RBAC->>DB: audit row
         RBAC-->>Op: the permissions now set
     end
-    Note over RBAC,SV: Permissions are never stored here. GET .../roles/{name}/permissions reads them live.
+    Note over RBAC,SV: The service decides what may be granted (its own prefix and doctype checks).<br/>Permissions are never stored here. GET .../roles/{name}/permissions reads them live.
 ```
 
 ## 6. Create a user
@@ -125,8 +129,8 @@ sequenceDiagram
     participant DB as RBAC database
     participant KC as Keycloak
 
-    Op->>RBAC: POST /users/create {realm, username, email, roles: [{application_id, name}], send_invite}
-    RBAC->>DB: realm registered? applications in that realm?
+    Op->>RBAC: POST /users/create {realm, username, email, roles: [{client_id, name}], send_invite}
+    RBAC->>KC: realm managed? each client a managed application?
     RBAC->>KC: create user
     alt username or email exists
         RBAC->>KC: find the existing user (re-run is safe)

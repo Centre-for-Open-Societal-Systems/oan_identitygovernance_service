@@ -14,10 +14,9 @@ from .controllers.auth import AuthController
 from .controllers.catalogue import CatalogueController
 from .controllers.users import UsersController
 from .envelope import RbacExceptionHandler
-from .models import AllowedPermission, Application, AuditLog, Realm
+from .models import AuditLog
 
-# Parents before children (foreign keys).
-_TABLES = (Realm, Application, AllowedPermission, AuditLog)
+_TABLES = (AuditLog,)
 
 
 async def _create_tables() -> None:

@@ -3,36 +3,29 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.envelope import RbacError
 from app.keycloak import keycloak
-from app.models import Application, Realm
 from app.schemas import UserOut
-from app.services.common import audit, get_app, get_client
+from app.services.common import audit, check_realm, get_app
 
 
-async def _resolve_roles(db: AsyncSession, realm: str, refs: list[dict]) -> list[tuple[str, Application]]:
-    """(name, application) per reference. Whether the role exists is Keycloak's answer, checked when it is mapped."""
-    out = []
-    for ref in refs:
-        app = await get_app(db, ref["application_id"])
-        if app.realm != realm:
-            raise RbacError("ROLE_REALM", f"Role {ref['name']} belongs to realm {app.realm}, not {realm}", 422)
-        out.append((ref["name"], app))
-    return out
+async def _resolve_roles(realm: str, refs: list[dict]) -> list[tuple[str, dict]]:
+    """(name, application client) per reference, in the user's realm. Whether the role exists is Keycloak's answer,
+    checked when it is mapped."""
+    return [(ref["name"], await get_app(realm, ref["client_id"])) for ref in refs]
 
 
-async def _kc_role_reps(realm: str, client_uuid: str, app: Application, names: list[str]) -> list[dict]:
-    by_name = {r["name"]: r for r in await keycloak.list_client_roles(realm, client_uuid)}
+async def _kc_role_reps(realm: str, client: dict, names: list[str]) -> list[dict]:
+    by_name = {r["name"]: r for r in await keycloak.list_client_roles(realm, client["id"])}
     missing = [n for n in names if n not in by_name]
     if missing:
-        raise RbacError("KEYCLOAK_ROLE_MISSING", f"Roles missing in Keycloak client {app.mnemonic}: {missing}", 409)
+        raise RbacError("KEYCLOAK_ROLE_MISSING", f"Roles missing in Keycloak client {client['clientId']}: {missing}", 409)
     return [by_name[n] for n in names]
 
 
 async def create_user(db: AsyncSession, actor: str, data: dict) -> UserOut:
     """Section 4: validate, create in Keycloak, map roles, invite, audit."""
     realm = data["realm"]
-    if not await db.get(Realm, realm):
-        raise RbacError("REALM_NOT_FOUND", f"Realm {realm} is not registered", 404)
-    resolved = await _resolve_roles(db, realm, data.get("roles", []))
+    check_realm(realm)
+    resolved = await _resolve_roles(realm, data.get("roles", []))
 
     body = {
         "username": data["username"], "email": data.get("email"),
@@ -49,16 +42,15 @@ async def create_user(db: AsyncSession, actor: str, data: dict) -> UserOut:
             raise RbacError("KEYCLOAK_CONFLICT", "Username or email already used by another user", 409)
         kc_id = found.json()[0]["id"]
 
-    by_app: dict[str, tuple[Application, list[str]]] = {}
-    for name, app in resolved:
-        by_app.setdefault(app.id, (app, []))[1].append(name)
-    for app, names in by_app.values():
-        client_uuid = (await get_client(app))["id"]
-        await keycloak.add_client_roles(realm, kc_id, client_uuid, await _kc_role_reps(realm, client_uuid, app, names))
+    by_app: dict[str, tuple[dict, list[str]]] = {}
+    for name, client in resolved:
+        by_app.setdefault(client["id"], (client, []))[1].append(name)
+    for client, names in by_app.values():
+        await keycloak.add_client_roles(realm, kc_id, client["id"], await _kc_role_reps(realm, client, names))
     if data.get("send_invite", True):
         await keycloak.request("PUT", f"/{realm}/users/{kc_id}/execute-actions-email", json=["UPDATE_PASSWORD", "VERIFY_EMAIL"])
 
-    audit(db, actor, "user.create", f"{realm}/{data['username']}", after={"keycloak_id": kc_id, "roles": [f"{a.mnemonic}/{n}" for n, a in resolved]})
+    audit(db, actor, "user.create", f"{realm}/{data['username']}", after={"keycloak_id": kc_id, "roles": [f"{c['clientId']}/{n}" for n, c in resolved]})
     await db.commit()
     return UserOut.of(await keycloak.get_user(realm, kc_id))
 
@@ -73,13 +65,12 @@ async def set_status(db: AsyncSession, actor: str, realm: str, user_id: str, ena
 
 async def assign_role(db: AsyncSession, actor: str, realm: str, user_id: str, ref: dict, grant: bool) -> UserOut:
     user = await keycloak.get_user(realm, user_id)
-    (name, app), = await _resolve_roles(db, realm, [ref])
-    client_uuid = (await get_client(app))["id"]
-    reps = await _kc_role_reps(realm, client_uuid, app, [name])
+    (name, client), = await _resolve_roles(realm, [ref])
+    reps = await _kc_role_reps(realm, client, [name])
     if grant:
-        await keycloak.add_client_roles(realm, user_id, client_uuid, reps)
+        await keycloak.add_client_roles(realm, user_id, client["id"], reps)
     else:
-        await keycloak.request("DELETE", f"/{realm}/users/{user_id}/role-mappings/clients/{client_uuid}", json=reps)
-    audit(db, actor, "user.role.grant" if grant else "user.role.revoke", f"{realm}/{user.get('username')}", after={"role": f"{app.mnemonic}/{name}"})
+        await keycloak.request("DELETE", f"/{realm}/users/{user_id}/role-mappings/clients/{client['id']}", json=reps)
+    audit(db, actor, "user.role.grant" if grant else "user.role.revoke", f"{realm}/{user.get('username')}", after={"role": f"{client['clientId']}/{name}"})
     await db.commit()
     return UserOut.of(user)
