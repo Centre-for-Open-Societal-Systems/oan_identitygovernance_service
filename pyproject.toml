@@ -1,6 +1,6 @@
 [project]
 name = "central-rbac"
-version = "0.1.0"
+version = "0.0.0"
 description = "Central RBAC control plane over Keycloak and managed services"
 requires-python = ">=3.12"
 dependencies = [
