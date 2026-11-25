@@ -5,11 +5,16 @@
 # - image.tag: the immutable build tag
 # Create before install, in the release namespace:
 # - Secret central-rbac-keycloak-client (key client_secret): secret of the hand-registered
-#   `central-rbac` client in the master realm (standard flow on, redirect URI https://<host>/auth/callback)
+#   `central-rbac` client in the staff realm (standard flow and service account on, redirect URI
+#   https://<host>/auth/callback)
+# - Secret commons-postgresql (key postgres-password): the superuser password of the frappe-common
+#   PostgreSQL, copied from Secret oan-frappe-common-db (key password) in namespace frappe-common
 
 global:
   hostname: identitygovernance-service.development.oanstaging.com
   keycloakBaseUrl: https://keycloak.development.oanstaging.com
+  # The shared PostgreSQL of the Frappe services; postgres-init creates this release's database and user in it.
+  postgresqlHost: oan-frappe-common-db-postgresql-subchart.frappe-common
 
 image:
   registry: 379220350808.dkr.ecr.ap-south-1.amazonaws.com
