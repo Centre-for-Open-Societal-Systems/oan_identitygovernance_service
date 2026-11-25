@@ -1,0 +1,14 @@
+# Values for the oan-identitygovernance-gateway chart (apisix/k8s).
+# Target: the oan_dev k3s node, namespace `identitygovernance`, installed by the Jenkins stage
+# "develop → gateway (apisix)" (ci/deploy-gateway.sh). APISIX and its Ingress Controller run in namespace
+# api6-gateway on the same node. In dev APISIX terminates TLS for every *.development.oanstaging.com host with one
+# wildcard (oan-helm environments/dev/manifests/apisix-edge.yaml), so this chart creates no ApisixTls.
+# After the stage ran, `kubectl -n identitygovernance get apisixroute` lists the route.
+
+ingressClassName: apisix
+
+# Must equal global.hostname in oan-identitygovernance-service.yaml (RBAC_PUBLIC_URL, the OIDC redirect URI).
+host: identitygovernance-service.development.oanstaging.com
+
+serviceName: identitygovernance-oan-identitygovernance-service
+servicePort: 80

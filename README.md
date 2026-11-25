@@ -43,4 +43,8 @@ Drift report (6), service-to-RBAC role reports (3.4), Alembic.
 
 ## Deploy
 
+The public host is routed by APISIX (oan_dev): the chart `apisix/k8s` holds the ApisixRoute, values in
+`helm/environments/dev/oan-identitygovernance-gateway.yaml`, installed by `ci/deploy-gateway.sh` (Jenkins stage
+`develop → gateway (apisix)`), packaged and published to oan-helm like the app chart.
+
 Helm chart: `helm/oan-identitygovernance-service`; dev values: `helm/environments/dev/`.

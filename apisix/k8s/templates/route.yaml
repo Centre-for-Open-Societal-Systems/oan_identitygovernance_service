@@ -1,0 +1,63 @@
+{{- /*
+Everything the service serves goes to it: the API has its own authentication (operator tokens, or the login cookie),
+so the gateway only terminates TLS and forwards. HTTPS only: plain HTTP gets a 301, because without it an exact-host
+route would answer HTTP itself before the edge redirect.
+*/ -}}
+apiVersion: apisix.apache.org/v2
+kind: ApisixRoute
+metadata:
+  name: rbac
+  labels:
+    app: oan-identitygovernance
+spec:
+  ingressClassName: {{ .Values.ingressClassName | quote }}
+  http:
+  - name: rbac
+    match:
+      hosts:
+      - {{ required "host is required" .Values.host | quote }}
+      paths:
+      - /*
+      exprs:
+      - subject:
+          scope: Variable
+          name: scheme
+        op: Equal
+        value: https
+    backends:
+    - serviceName: {{ .Values.serviceName | quote }}
+      servicePort: {{ .Values.servicePort }}
+    plugins:
+    - name: client-control
+      enable: true
+      config:
+        max_body_size: {{ .Values.maxBodySize }}
+    # APISIX's own port (9443) would otherwise reach the service as the client's.
+    - name: proxy-rewrite
+      enable: true
+      config:
+        headers:
+          set:
+            X-Forwarded-Proto: https
+            X-Forwarded-Port: "443"
+  - name: rbac-http
+    match:
+      hosts:
+      - {{ .Values.host | quote }}
+      paths:
+      - /*
+      exprs:
+      - subject:
+          scope: Variable
+          name: scheme
+        op: Equal
+        value: http
+    backends:
+    - serviceName: {{ .Values.serviceName | quote }}
+      servicePort: {{ .Values.servicePort }}
+    plugins:
+    - name: redirect
+      enable: true
+      config:
+        uri: "https://$host$request_uri"
+        ret_code: 301
