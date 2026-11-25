@@ -66,7 +66,7 @@ class UsersController(BaseController):
         return ok(await users_svc.set_status(db, p.username, realm, user_id, True))
 
     async def grant(self, user_id: str, realm: str, body: schemas.RoleAssignIn, db: AsyncSession = Depends(get_session), p: Principal = Depends(require(OPERATOR))):
-        return ok(await users_svc.assign_role(db, p.username, realm, user_id, body.role_id, True))
+        return ok(await users_svc.assign_role(db, p.username, realm, user_id, body.model_dump(), True))
 
     async def revoke(self, user_id: str, realm: str, body: schemas.RoleAssignIn, db: AsyncSession = Depends(get_session), p: Principal = Depends(require(OPERATOR))):
-        return ok(await users_svc.assign_role(db, p.username, realm, user_id, body.role_id, False))
+        return ok(await users_svc.assign_role(db, p.username, realm, user_id, body.model_dump(), False))

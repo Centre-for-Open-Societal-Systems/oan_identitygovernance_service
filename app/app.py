@@ -12,13 +12,12 @@ from openg2p_fastapi_common.app import Initializer as BaseInitializer
 
 from .controllers.auth import AuthController
 from .controllers.catalogue import CatalogueController
-from .controllers.sync import SyncController
 from .controllers.users import UsersController
 from .envelope import RbacExceptionHandler
-from .models import AllowedPermission, Application, AuditLog, Realm, Role, SyncRun
+from .models import AllowedPermission, Application, AuditLog, Realm
 
 # Parents before children (foreign keys).
-_TABLES = (Realm, Application, Role, AllowedPermission, AuditLog, SyncRun)
+_TABLES = (Realm, Application, AllowedPermission, AuditLog)
 
 
 async def _create_tables() -> None:
@@ -34,7 +33,6 @@ class Initializer(BaseInitializer):
         AuthController().post_init()
         CatalogueController().post_init()
         UsersController().post_init()
-        SyncController().post_init()
 
     async def fastapi_app_startup(self, app):
         # Dev convenience until Alembic migrations are added; `migrate` runs the same step on demand.

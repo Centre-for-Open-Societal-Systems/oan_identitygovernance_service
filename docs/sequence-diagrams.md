@@ -44,7 +44,7 @@ sequenceDiagram
     end
 ```
 
-## 3. Register an application (with first sync)
+## 3. Register an application
 
 ```mermaid
 sequenceDiagram
@@ -58,12 +58,11 @@ sequenceDiagram
     alt client already exists
         RBAC->>KC: find client by id
     end
-    RBAC->>KC: read client secret
+    RBAC->>KC: read client secret (none for a public client)
     RBAC->>KC: create client role OAN Administrator, grant it to the operator (sub)
     RBAC->>DB: insert application, audit row
-    RBAC->>KC: list the client's roles
-    RBAC->>DB: insert each as role (status imported), sync_run, audit row
     RBAC-->>Op: application + client secret (shown once)
+    Note over RBAC,KC: The client's roles are not copied: they are listed live from Keycloak<br/>(GET /applications/{app_id}/roles/list).
 ```
 
 ## 4. Create a role in a managed service
@@ -76,19 +75,20 @@ sequenceDiagram
     participant KC as Keycloak
     participant SV as Auth service
 
-    Op->>RBAC: POST /roles/create {application_id, name}
+    Op->>RBAC: POST /applications/{app_id}/roles/create {name}
     RBAC->>KC: is the application's client enabled?
-    RBAC->>DB: insert role (status pending)
-    RBAC->>SV: POST /roles {role}
-    alt service accepts
-        SV-->>RBAC: 201
-        RBAC->>DB: status active
-    else service refuses, is unreachable, or no admin_api_url
-        RBAC->>DB: status failed + error text
-    end
+    RBAC->>SV: POST /roles {role} (operator's token)
+    SV->>SV: create the Frappe role
+    SV->>KC: create the client role of the same name (its login option's admin client)
+    SV-->>RBAC: 201, or an error passed back to the operator
     RBAC->>DB: audit row
-    RBAC-->>Op: role (active or failed)
-    Note over RBAC,KC: The Frappe role does not exist in Keycloak, so granting it<br/>to a user fails with KEYCLOAK_ROLE_MISSING until a client role of the<br/>same name exists there. Open item.
+    RBAC->>KC: read the role back from the client
+    alt role in Keycloak
+        RBAC-->>Op: role {application_id, name}
+    else service created no Keycloak role
+        RBAC-->>Op: 502 KEYCLOAK_ROLE_MISSING (admin_client_* not set on the login option)
+    end
+    Note over RBAC,SV: Nothing about a role is stored here. Keycloak says which roles exist,<br/>the service says what they may do. Delete goes the same way: POST .../roles/{name}/delete.
 ```
 
 ## 5. Set a role's permissions
@@ -100,8 +100,7 @@ sequenceDiagram
     participant DB as RBAC database
     participant SV as Auth service
 
-    Op->>RBAC: POST /roles/{id}/permissions {permissions: [{resource, action}]}
-    RBAC->>DB: role active or imported?
+    Op->>RBAC: POST /applications/{app_id}/roles/{name}/permissions {permissions: [{resource, action}]}
     RBAC->>DB: load the application's allow-list
     alt a pair is not in the allow-list
         RBAC-->>Op: 422 NOT_ALLOWED
@@ -114,7 +113,7 @@ sequenceDiagram
         RBAC->>DB: audit row
         RBAC-->>Op: the permissions now set
     end
-    Note over RBAC,SV: Permissions are never stored here. GET /roles/{id}/permissions reads them live.
+    Note over RBAC,SV: Permissions are never stored here. GET .../roles/{name}/permissions reads them live.
 ```
 
 ## 6. Create a user
@@ -126,14 +125,14 @@ sequenceDiagram
     participant DB as RBAC database
     participant KC as Keycloak
 
-    Op->>RBAC: POST /users/create {realm, username, email, role_ids, send_invite}
-    RBAC->>DB: realm registered? roles active or imported?
+    Op->>RBAC: POST /users/create {realm, username, email, roles: [{application_id, name}], send_invite}
+    RBAC->>DB: realm registered? applications in that realm?
     RBAC->>KC: create user
     alt username or email exists
         RBAC->>KC: find the existing user (re-run is safe)
     end
     loop each application of the chosen roles
-        RBAC->>KC: list the client's roles
+        RBAC->>KC: list the client's roles (a missing one is 409 KEYCLOAK_ROLE_MISSING)
         RBAC->>KC: add client roles to the user
     end
     opt send_invite
@@ -142,23 +141,4 @@ sequenceDiagram
     RBAC->>DB: audit row
     RBAC->>KC: read the user back
     RBAC-->>Op: user
-```
-
-## 7. On-demand sync
-
-```mermaid
-sequenceDiagram
-    actor Op as Operator
-    participant RBAC
-    participant DB as RBAC database
-    participant KC as Keycloak
-
-    Op->>RBAC: POST /sync/run/{app_id}
-    RBAC->>KC: list the client's roles
-    RBAC->>DB: add roles not yet known (status imported); fill missing Keycloak ids
-    RBAC->>DB: sync_run (counts, errors), audit row
-    RBAC-->>Op: sync run
-    Op->>RBAC: GET /sync/status?realm=
-    RBAC-->>Op: latest 50 runs
-    Note over RBAC,KC: One direction only (Keycloak to RBAC), roles only. Users and permissions<br/>are read live, so there is nothing else to copy. Scheduled runs and the drift report are not built.
 ```

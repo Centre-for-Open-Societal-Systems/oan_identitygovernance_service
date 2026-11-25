@@ -30,15 +30,16 @@ the staff IAM access-token cookie. Cookie-authenticated writes must send `X-Requ
 
 ## Implemented (design section)
 
-- Realms, applications (3.1: row, Keycloak client, secret returned once, first sync with rollback)
-- Roles (3.2: pending, service admin API, active/failed), permissions with allow-list (3.3)
-- Users create / bulk / enable / disable / grant / revoke (4)
-- First sync from Keycloak with `imported` -> accept (5.1)
+- Realms, applications (3.1: row, Keycloak client, secret returned once, `OAN Administrator` granted to the operator)
+- Roles (3.2): listed live from the application's Keycloak client; created and deleted through the service admin API
+  with the operator's token, the service writing the Keycloak client role. Nothing about a role is stored here.
+- Permissions with allow-list (3.3), read and written live in the service
+- Users create / bulk / enable / disable / grant / revoke (4), roles named by `{application_id, name}`
 - Audit log on every write
 
 ## Not yet
 
-Scheduled sync, drift report (6), service-to-RBAC role reports (3.4), secret store beyond env refs, Alembic.
+Drift report (6), service-to-RBAC role reports (3.4), Alembic.
 
 ## Deploy
 

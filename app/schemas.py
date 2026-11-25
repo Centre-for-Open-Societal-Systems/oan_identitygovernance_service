@@ -1,6 +1,4 @@
-from datetime import datetime
-
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field
 
 
 class RealmIn(BaseModel):
@@ -15,9 +13,14 @@ class ApplicationIn(BaseModel):
 
 
 class RoleIn(BaseModel):
+    name: str
+
+
+class RoleRef(BaseModel):
+    """A role is named by its application and its name; it is the Keycloak client role of that name."""
+
     application_id: str
     name: str
-    description: str | None = None  # sent to the service, not stored here
 
 
 class PermissionPair(BaseModel):
@@ -41,7 +44,7 @@ class UserIn(BaseModel):
     last_name: str | None = None
     groups: list[str] = []
     location_codes: list[str] = []
-    role_ids: list[str] = []
+    roles: list[RoleRef] = []
     send_invite: bool = True
 
 
@@ -49,8 +52,8 @@ class BulkUsersIn(BaseModel):
     users: list[UserIn]
 
 
-class RoleAssignIn(BaseModel):
-    role_id: str
+class RoleAssignIn(RoleRef):
+    pass
 
 
 class ApplicationOut(BaseModel):
@@ -73,31 +76,16 @@ class ApplicationOut(BaseModel):
 
 
 class ApplicationCreatedOut(ApplicationOut):
-    client_secret: str
+    client_secret: str | None  # None for a public client
     client_secret_note: str = "Shown once. Not stored."
 
 
 class RoleOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    """A client role of the application's Keycloak client, read live."""
 
-    id: str
     application_id: str
     name: str
-    keycloak_role_id: str | None
-    status: str
-    error: str | None
-
-
-class SyncRunOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    realm: str
-    direction: str
-    started: datetime
-    finished: datetime | None
-    counts: dict | None
-    errors: list | None
+    description: str | None
 
 
 class UserOut(BaseModel):

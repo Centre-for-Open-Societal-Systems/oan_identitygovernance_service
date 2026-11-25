@@ -2,8 +2,8 @@ import uuid
 from datetime import datetime, timezone
 
 from openg2p_fastapi_common.models import BaseORMModel
-from sqlalchemy import JSON, DateTime, ForeignKey, String, Text, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import JSON, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column
 
 
 def _id() -> str:
@@ -25,7 +25,8 @@ class Realm(BaseORMModel):
 class Application(BaseORMModel):
     """Registry of the Keycloak clients central RBAC manages, and how to reach each one's admin API.
 
-    Everything about the client itself (description, enabled, uuid) is read from Keycloak.
+    Everything about the client itself (description, enabled, uuid) and its roles is read from Keycloak; a role's
+    permissions are read from the service. Nothing about a role is stored here.
     """
 
     __tablename__ = "applications"
@@ -35,27 +36,7 @@ class Application(BaseORMModel):
     realm: Mapped[str] = mapped_column(ForeignKey("realms.name"))
     mnemonic: Mapped[str] = mapped_column(String(100))  # the Keycloak clientId
     admin_api_url: Mapped[str | None] = mapped_column(String(500))
-    # Name of the env var / secret-store key holding the service's admin API token. Never the value.
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
-
-    roles: Mapped[list["Role"]] = relationship(back_populates="application")
-
-
-class Role(BaseORMModel):
-    """Onboarding state of a role. Name and description live in Keycloak; permissions live in the service."""
-
-    __tablename__ = "roles"
-    __table_args__ = (UniqueConstraint("application_id", "name"),)
-
-    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
-    application_id: Mapped[str] = mapped_column(ForeignKey("applications.id"))
-    name: Mapped[str] = mapped_column(String(200))
-    keycloak_role_id: Mapped[str | None] = mapped_column(String(64))
-    # pending | active | failed | disabled | imported
-    status: Mapped[str] = mapped_column(String(20), default="pending")
-    error: Mapped[str | None] = mapped_column(Text)
-
-    application: Mapped[Application] = relationship(back_populates="roles")
 
 
 class AllowedPermission(BaseORMModel):
@@ -80,15 +61,3 @@ class AuditLog(BaseORMModel):
     before: Mapped[dict | None] = mapped_column(JSON)
     after: Mapped[dict | None] = mapped_column(JSON)
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
-
-
-class SyncRun(BaseORMModel):
-    __tablename__ = "sync_runs"
-
-    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
-    realm: Mapped[str] = mapped_column(String(100))
-    direction: Mapped[str] = mapped_column(String(50))
-    started: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
-    finished: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    counts: Mapped[dict | None] = mapped_column(JSON)
-    errors: Mapped[list | None] = mapped_column(JSON)
