@@ -2,7 +2,7 @@
   "info": {
     "name": "central-rbac service (own routes)",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Start the service with the central-rbac client of the staff realm (login and service account), then run 0 Setup -> 1 Service routes -> 2 Cleanup. Needs kc_base_url, kc_realm, rbac_client_secret, op_username, op_password."
+    "description": "Start the service with the central-rbac client of the staff realm (login and service account). Folders 0-2 call only RBAC, apart from the operator login; folder 3 removes what the run created. Folder 2 needs the grievance client registered once (POST /applications/create with its admin API URL) and grievance's login options reading roles from that client. Needs kc_base_url, kc_realm, rbac_client_secret, op_username, op_password, grievance_admin_url, grievance_client_id."
   },
   "item": [
     {
@@ -127,41 +127,7 @@
           ]
         },
         {
-          "name": "Register realm",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{rbac_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{rbac_base_url}}/realms/register",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"{{kc_realm}}\"\n}"
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 200', () => pm.response.to.have.status(200));",
-                  "const j = pm.response.json();",
-                  "pm.test('envelope ok', () => pm.expect(j.response_header.status).to.eql('SUCCESS'));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "List realms",
+          "name": "Managed realms",
           "request": {
             "method": "GET",
             "header": [
@@ -180,7 +146,8 @@
                 "exec": [
                   "pm.test('status 200', () => pm.response.to.have.status(200));",
                   "const j = pm.response.json();",
-                  "pm.test('envelope ok', () => pm.expect(j.response_header.status).to.eql('SUCCESS'));"
+                  "pm.test('envelope ok', () => pm.expect(j.response_header.status).to.eql('SUCCESS'));",
+                  "pm.test('realm managed', () => pm.expect(j.response_body.map(x => x.name)).to.include(pm.environment.get('kc_realm')));"
                 ]
               }
             }
@@ -203,7 +170,7 @@
             "url": "{{rbac_base_url}}/applications/create",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"realm\": \"{{kc_realm}}\",\n  \"mnemonic\": \"newman-app\",\n  \"description\": \"Created by the newman run\"\n}"
+              "raw": "{\n  \"realm\": \"{{kc_realm}}\",\n  \"client_id\": \"newman-app\",\n  \"description\": \"Created by the newman run\",\n  \"admin_api_url\": \"https://newman-app.invalid/v1/admin\"\n}"
             }
           },
           "event": [
@@ -215,7 +182,7 @@
                   "pm.test('status 200', () => pm.response.to.have.status(200));",
                   "const j = pm.response.json();",
                   "pm.test('envelope ok', () => pm.expect(j.response_header.status).to.eql('SUCCESS'));",
-                  "pm.environment.set('app_id', j.response_body.id);"
+                  "pm.test('admin API is the root URL', () => pm.expect(j.response_body.admin_api_url).to.eql('https://newman-app.invalid/v1/admin'));"
                 ]
               }
             }
@@ -259,7 +226,7 @@
                 "value": "Bearer {{rbac_token}}"
               }
             ],
-            "url": "{{rbac_base_url}}/applications/{{app_id}}/roles/list"
+            "url": "{{rbac_base_url}}/applications/{{kc_realm}}/newman-app/roles/list"
           },
           "event": [
             {
@@ -303,41 +270,7 @@
           ]
         },
         {
-          "name": "Set allow-list",
-          "request": {
-            "method": "PUT",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{rbac_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{rbac_base_url}}/applications/{{app_id}}/allow-list",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"permissions\": [\n    {\n      \"resource\": \"Farmer\",\n      \"action\": \"read\"\n    }\n  ]\n}"
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 200', () => pm.response.to.have.status(200));",
-                  "const j = pm.response.json();",
-                  "pm.test('envelope ok', () => pm.expect(j.response_header.status).to.eql('SUCCESS'));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Create role without an admin API is refused",
+          "name": "Create role on an unreachable service is refused",
           "request": {
             "method": "POST",
             "header": [
@@ -350,7 +283,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{rbac_base_url}}/applications/{{app_id}}/roles/create",
+            "url": "{{rbac_base_url}}/applications/{{kc_realm}}/newman-app/roles/create",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"newman-role\"\n}"
@@ -362,9 +295,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 409', () => pm.response.to.have.status(409));",
+                  "pm.test('status 502', () => pm.response.to.have.status(502));",
                   "const j = pm.response.json();",
-                  "pm.test('error NO_ADMIN_API', () => pm.expect(j.response_header.error_code).to.eql('NO_ADMIN_API'));"
+                  "pm.test('error SERVICE_UNREACHABLE', () => pm.expect(j.response_header.error_code).to.eql('SERVICE_UNREACHABLE'));"
                 ]
               }
             }
@@ -380,7 +313,7 @@
                 "value": "Bearer {{rbac_token}}"
               }
             ],
-            "url": "{{rbac_base_url}}/applications/{{app_id}}/roles/list"
+            "url": "{{rbac_base_url}}/applications/{{kc_realm}}/newman-app/roles/list"
           },
           "event": [
             {
@@ -414,7 +347,7 @@
             "url": "{{rbac_base_url}}/users/create",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"realm\": \"{{kc_realm}}\",\n  \"username\": \"newman.user\",\n  \"email\": \"newman.user@example.com\",\n  \"first_name\": \"Newman\",\n  \"last_name\": \"User\",\n  \"send_invite\": false,\n  \"roles\": [\n    {\n      \"application_id\": \"{{app_id}}\",\n      \"name\": \"OAN Administrator\"\n    }\n  ]\n}"
+              "raw": "{\n  \"realm\": \"{{kc_realm}}\",\n  \"username\": \"newman.user\",\n  \"email\": \"newman.user@example.com\",\n  \"first_name\": \"Newman\",\n  \"last_name\": \"User\",\n  \"send_invite\": false,\n  \"roles\": [\n    {\n      \"client_id\": \"newman-app\",\n      \"name\": \"OAN Administrator\"\n    }\n  ]\n}"
             }
           },
           "event": [
@@ -548,7 +481,7 @@
                 "value": "Bearer {{rbac_token}}"
               }
             ],
-            "url": "{{rbac_base_url}}/applications/{{app_id}}/disable"
+            "url": "{{rbac_base_url}}/applications/{{kc_realm}}/newman-app/disable"
           },
           "event": [
             {
@@ -570,24 +503,16 @@
       "name": "2. Managed service: grievance, through RBAC",
       "item": [
         {
-          "name": "Register oan-client with grievance's admin API",
+          "name": "Grievance is a registered application",
           "request": {
-            "method": "POST",
+            "method": "GET",
             "header": [
               {
                 "key": "Authorization",
                 "value": "Bearer {{rbac_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
               }
             ],
-            "url": "{{rbac_base_url}}/applications/create",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"realm\": \"{{kc_realm}}\",\n  \"mnemonic\": \"oan-client\",\n  \"admin_api_url\": \"{{grievance_admin_url}}\"\n}"
-            }
+            "url": "{{rbac_base_url}}/applications/list?realm={{kc_realm}}"
           },
           "event": [
             {
@@ -598,14 +523,15 @@
                   "pm.test('status 200', () => pm.response.to.have.status(200));",
                   "const j = pm.response.json();",
                   "pm.test('envelope ok', () => pm.expect(j.response_header.status).to.eql('SUCCESS'));",
-                  "pm.environment.set('g_app_id', j.response_body.id);"
+                  "const a = j.response_body.find(x => x.client_id === pm.environment.get('grievance_client_id'));",
+                  "pm.test('registered, admin API is its root URL', () => pm.expect(a && a.admin_api_url).to.eql(pm.environment.get('grievance_admin_url')));"
                 ]
               }
             }
           ]
         },
         {
-          "name": "Roles of oan-client include Grievance Officer",
+          "name": "Roles of the grievance client include Grievance Officer",
           "request": {
             "method": "GET",
             "header": [
@@ -614,7 +540,7 @@
                 "value": "Bearer {{rbac_token}}"
               }
             ],
-            "url": "{{rbac_base_url}}/applications/{{g_app_id}}/roles/list"
+            "url": "{{rbac_base_url}}/applications/{{kc_realm}}/{{grievance_client_id}}/roles/list"
           },
           "event": [
             {
@@ -626,40 +552,6 @@
                   "const j = pm.response.json();",
                   "pm.test('envelope ok', () => pm.expect(j.response_header.status).to.eql('SUCCESS'));",
                   "pm.test('Grievance Officer listed', () => pm.expect(j.response_body.map(x => x.name)).to.include('Grievance Officer'));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Set allow-list",
-          "request": {
-            "method": "PUT",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{rbac_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{rbac_base_url}}/applications/{{g_app_id}}/allow-list",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"permissions\": [\n    {\n      \"resource\": \"Grievance\",\n      \"action\": \"read\"\n    },\n    {\n      \"resource\": \"Grievance\",\n      \"action\": \"write\"\n    }\n  ]\n}"
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 200', () => pm.response.to.have.status(200));",
-                  "const j = pm.response.json();",
-                  "pm.test('envelope ok', () => pm.expect(j.response_header.status).to.eql('SUCCESS'));"
                 ]
               }
             }
@@ -679,7 +571,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{rbac_base_url}}/applications/{{g_app_id}}/roles/create",
+            "url": "{{rbac_base_url}}/applications/{{kc_realm}}/{{grievance_client_id}}/roles/create",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Grievance RBAC Test\"\n}"
@@ -710,7 +602,7 @@
                 "value": "Bearer {{rbac_token}}"
               }
             ],
-            "url": "{{rbac_base_url}}/applications/{{g_app_id}}/roles/list"
+            "url": "{{rbac_base_url}}/applications/{{kc_realm}}/{{grievance_client_id}}/roles/list"
           },
           "event": [
             {
@@ -741,7 +633,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{rbac_base_url}}/applications/{{g_app_id}}/roles/Grievance%20RBAC%20Test/permissions",
+            "url": "{{rbac_base_url}}/applications/{{kc_realm}}/{{grievance_client_id}}/roles/Grievance%20RBAC%20Test/permissions",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"permissions\": [\n    {\n      \"resource\": \"Grievance\",\n      \"action\": \"read\"\n    }\n  ]\n}"
@@ -771,7 +663,7 @@
                 "value": "Bearer {{rbac_token}}"
               }
             ],
-            "url": "{{rbac_base_url}}/applications/{{g_app_id}}/roles/Grievance%20RBAC%20Test/permissions"
+            "url": "{{rbac_base_url}}/applications/{{kc_realm}}/{{grievance_client_id}}/roles/Grievance%20RBAC%20Test/permissions"
           },
           "event": [
             {
@@ -805,7 +697,7 @@
             "url": "{{rbac_base_url}}/users/create",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"realm\": \"{{kc_realm}}\",\n  \"username\": \"newman.grievance\",\n  \"email\": \"newman.grievance@example.com\",\n  \"first_name\": \"Newman\",\n  \"last_name\": \"Grievance\",\n  \"send_invite\": false,\n  \"roles\": [\n    {\n      \"application_id\": \"{{g_app_id}}\",\n      \"name\": \"Grievance Officer\"\n    }\n  ]\n}"
+              "raw": "{\n  \"realm\": \"{{kc_realm}}\",\n  \"username\": \"newman.grievance\",\n  \"email\": \"newman.grievance@example.com\",\n  \"first_name\": \"Newman\",\n  \"last_name\": \"Grievance\",\n  \"send_invite\": false,\n  \"roles\": [\n    {\n      \"client_id\": \"{{grievance_client_id}}\",\n      \"name\": \"Grievance Officer\"\n    }\n  ]\n}"
             }
           },
           "event": [
@@ -840,7 +732,7 @@
             "url": "{{rbac_base_url}}/users/{{g_user_id}}/roles/grant?realm={{kc_realm}}",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"application_id\": \"{{g_app_id}}\",\n  \"name\": \"Grievance RBAC Test\"\n}"
+              "raw": "{\n  \"client_id\": \"{{grievance_client_id}}\",\n  \"name\": \"Grievance RBAC Test\"\n}"
             }
           },
           "event": [
@@ -896,7 +788,7 @@
                 "value": "Bearer {{rbac_token}}"
               }
             ],
-            "url": "{{rbac_base_url}}/applications/{{g_app_id}}/roles/Grievance%20RBAC%20Test/delete"
+            "url": "{{rbac_base_url}}/applications/{{kc_realm}}/{{grievance_client_id}}/roles/Grievance%20RBAC%20Test/delete"
           },
           "event": [
             {
@@ -922,7 +814,7 @@
                 "value": "Bearer {{rbac_token}}"
               }
             ],
-            "url": "{{rbac_base_url}}/applications/{{g_app_id}}/roles/list"
+            "url": "{{rbac_base_url}}/applications/{{kc_realm}}/{{grievance_client_id}}/roles/list"
           },
           "event": [
             {
@@ -1148,7 +1040,7 @@
           ]
         },
         {
-          "name": "Find oan-client",
+          "name": "Find the grievance client",
           "request": {
             "method": "GET",
             "header": [
@@ -1157,7 +1049,7 @@
                 "value": "Bearer {{kc_token}}"
               }
             ],
-            "url": "{{kc_base_url}}/admin/realms/{{kc_realm}}/clients?clientId=oan-client"
+            "url": "{{kc_base_url}}/admin/realms/{{kc_realm}}/clients?clientId={{grievance_client_id}}"
           },
           "event": [
             {

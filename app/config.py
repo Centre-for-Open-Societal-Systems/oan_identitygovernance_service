@@ -13,12 +13,12 @@ class Settings(BaseSettings):
     )
 
     keycloak_url: str = "http://localhost:8080"
-    keycloak_admin_realm: str = "master"
+    keycloak_admin_realm: str = "staff"
     keycloak_client_id: str = "central-rbac"
     keycloak_client_secret: str = ""
-    # Direct login (backend-for-frontend): the confidential central-rbac client in master,
+    # Direct login (backend-for-frontend): the confidential central-rbac client in staff,
     # same client id/secret as the service account above.
-    auth_realm: str = "master"
+    auth_realm: str = "staff"
     auth_client_id: str = "central-rbac"
     public_url: str = "http://localhost:8000"  # externally visible base of this API (for the OIDC redirect_uri)
     post_login_url: str = "/"  # where the browser lands after login
@@ -32,3 +32,5 @@ class Settings(BaseSettings):
     iam_client_id: str = ""  # token azp must equal this
     iam_cookie_name: str = "X-Access-Token"  # TODO: confirm against the IAM service
     http_timeout: float = 15.0
+    # Realms whose clients and users RBAC manages; the service account needs realm-management roles in each.
+    managed_realms: list[str] = ["staff"]

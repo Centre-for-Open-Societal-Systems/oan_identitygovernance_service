@@ -30,12 +30,17 @@ the staff IAM access-token cookie. Cookie-authenticated writes must send `X-Requ
 
 ## Implemented (design section)
 
-- Realms, applications (3.1: row, Keycloak client, secret returned once, `OAN Administrator` granted to the operator)
-- Roles (3.2): listed live from the application's Keycloak client; created and deleted through the service admin API
-  with the operator's token, the service writing the Keycloak client role. Nothing about a role is stored here.
-- Permissions with allow-list (3.3), read and written live in the service
-- Users create / bulk / enable / disable / grant / revoke (4), roles named by `{application_id, name}`
-- Audit log on every write
+RBAC keeps no state of its own beyond an audit log. Keycloak and the services are the sources of truth.
+
+- Managed realms: the `RBAC_MANAGED_REALMS` setting.
+- Applications (3.1): one Keycloak client per service, marked with the client attribute `rbac.managed`, its root URL
+  the service's admin API (e.g. `https://grievance-service.<domain>/v1/admin`). Registering creates the client or takes
+  over an existing one, returns its secret once and grants `OAN Administrator` on it to the operator.
+- Roles (3.2): the client's roles, listed live; created and deleted through the service admin API with the operator's
+  token, the service writing the Keycloak client role.
+- Permissions (3.3): read and written live in the service, which decides what may be granted.
+- Users create / bulk / enable / disable / grant / revoke (4), roles named by `{client_id, name}`.
+- Audit log on every write: the only table.
 
 ## Not yet
 

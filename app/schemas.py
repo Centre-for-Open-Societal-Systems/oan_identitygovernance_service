@@ -1,15 +1,11 @@
 from pydantic import BaseModel, EmailStr, Field
 
 
-class RealmIn(BaseModel):
-    name: str
-
-
 class ApplicationIn(BaseModel):
     realm: str
-    mnemonic: str = Field(pattern=r"^[A-Za-z0-9._-]+$")
-    description: str | None = None  # stored on the Keycloak client, not here
-    admin_api_url: str | None = None
+    client_id: str = Field(pattern=r"^[A-Za-z0-9._-]+$")  # the Keycloak clientId, one per service
+    description: str | None = None  # stored on the Keycloak client
+    admin_api_url: str  # the service's admin API, e.g. https://grievance-service.<domain>/v1/admin; the client's root URL
 
 
 class RoleIn(BaseModel):
@@ -17,9 +13,9 @@ class RoleIn(BaseModel):
 
 
 class RoleRef(BaseModel):
-    """A role is named by its application and its name; it is the Keycloak client role of that name."""
+    """A role is the Keycloak client role `name` of application `client_id`, in the user's realm."""
 
-    application_id: str
+    client_id: str
     name: str
 
 
@@ -29,10 +25,6 @@ class PermissionPair(BaseModel):
 
 
 class RolePermissionsIn(BaseModel):
-    permissions: list[PermissionPair]
-
-
-class AllowListIn(BaseModel):
     permissions: list[PermissionPair]
 
 
@@ -57,21 +49,19 @@ class RoleAssignIn(RoleRef):
 
 
 class ApplicationOut(BaseModel):
-    """Registry row plus the live Keycloak client (`enabled` is None when the client no longer exists)."""
+    """The application's Keycloak client, read live."""
 
-    id: str
     realm: str
-    mnemonic: str
+    client_id: str
     admin_api_url: str | None
     description: str | None
-    enabled: bool | None
+    enabled: bool
 
     @classmethod
-    def of(cls, a, client: dict | None):
-        client = client or {}
+    def of(cls, realm: str, client: dict):
         return cls(
-            id=a.id, realm=a.realm, mnemonic=a.mnemonic, admin_api_url=a.admin_api_url,
-            description=client.get("description") or None, enabled=client.get("enabled"),
+            realm=realm, client_id=client["clientId"], admin_api_url=client.get("rootUrl") or None,
+            description=client.get("description") or None, enabled=client.get("enabled", True),
         )
 
 
@@ -83,7 +73,7 @@ class ApplicationCreatedOut(ApplicationOut):
 class RoleOut(BaseModel):
     """A client role of the application's Keycloak client, read live."""
 
-    application_id: str
+    client_id: str
     name: str
     description: str | None
 

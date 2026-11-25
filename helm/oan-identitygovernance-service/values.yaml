@@ -49,6 +49,8 @@ envVars:
   RBAC_KEYCLOAK_ADMIN_REALM: staff
   RBAC_KEYCLOAK_CLIENT_ID: '{{ .Values.keycloakClient.clientId }}'
   RBAC_AUTH_REALM: staff
+  # Realms whose clients and users RBAC manages (JSON list).
+  RBAC_MANAGED_REALMS: '["staff"]'
   RBAC_AUTH_CLIENT_ID: '{{ .Values.keycloakClient.clientId }}'
   RBAC_PUBLIC_URL: 'https://{{ .Values.global.hostname }}'
   RBAC_POST_LOGIN_URL: 'https://{{ .Values.global.hostname }}/'
