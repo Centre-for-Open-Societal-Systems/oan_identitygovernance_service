@@ -15,14 +15,16 @@ set -euo pipefail
 : "${RBAC_NAMESPACE:?RBAC_NAMESPACE is required}"
 : "${IMMUTABLE_TAG:?IMMUTABLE_TAG is required}"
 
+# DEPLOY_ENV picks the values: dev (develop) or staging (the staging branch, a promoted chart).
+DEPLOY_ENV="${DEPLOY_ENV:-dev}"
 CHART_TGZ="built-chart/oan-identitygovernance-service-${IMMUTABLE_TAG}.tgz"
-VALUES=helm/environments/dev/oan-identitygovernance-service.yaml
+VALUES="helm/environments/${DEPLOY_ENV}/oan-identitygovernance-service.yaml"
 NS="${RBAC_NAMESPACE}"
 RELEASE=identitygovernance
 
 test -f "${CHART_TGZ}" || { echo "${CHART_TGZ} is missing: run package_chart.py package first" >&2; exit 1; }
 
-echo "=== Deploying to oan_dev: namespace ${NS}, image tag ${IMMUTABLE_TAG} ==="
+echo "=== Deploying to ${DEPLOY_ENV}: namespace ${NS}, image tag ${IMMUTABLE_TAG} ==="
 
 helm upgrade --install "${RELEASE}" "${CHART_TGZ}" \
   --namespace "${NS}" \

@@ -1,0 +1,29 @@
+# Values for the oan-identitygovernance-service chart (helm/oan-identitygovernance-service).
+# Target: the QA RKE2 node (qa.oanstaging.com), the staging environment, installed by the Jenkins stage
+# "staging → QA cluster (helm)" (ci/deploy-helm-dev.sh with DEPLOY_ENV=staging).
+#
+# Set at install, not here:
+# - image.tag: the promoted Jenkins tag `<version>-staging.<build>`
+# Create before install, in the release namespace:
+# - Secret central-rbac-keycloak-client (key client_secret): secret of the hand-registered
+#   `central-rbac` client in the staff realm (standard flow and service account on, redirect URI
+#   https://<host>/auth/callback)
+# - Secret commons-postgresql (key postgres-password): the superuser password of the frappe-common
+#   PostgreSQL, copied from Secret oan-frappe-common-db (key password) in namespace frappe-common
+
+global:
+  hostname: identitygovernance-service.qa.oanstaging.com
+  keycloakBaseUrl: https://keycloak.qa.oanstaging.com
+  # The shared PostgreSQL of the Frappe services; postgres-init creates this release's database and user in it.
+  postgresqlHost: oan-frappe-common-db-postgresql-subchart.frappe-common
+
+image:
+  registry: 379220350808.dkr.ecr.ap-south-1.amazonaws.com
+  repository: eoan/oan-identitygovernance-service/identitygovernance-service
+  pullPolicy: IfNotPresent
+
+# No imagePullSecrets on QA: the node pulls from ECR with its IAM role.
+
+# The QA edge is APISIX, not Istio; route the host to this Service from the gateway chart.
+istio:
+  enabled: false

@@ -5,12 +5,14 @@
 //  develop        -> build + push the image, package the chart with that image, deploy it to oan_dev
 //                    (ci/deploy-helm-dev.sh), its APISIX route chart (ci/deploy-gateway.sh), then publish both
 //                    charts to repository/develop of oan-helm.
-//  staging        -> build + push the image only.
+//  staging        -> promote what develop built from the same source tree (ci/package_chart.py promote: the image
+//                    gets the <version>-staging.<build> tag, the chart is repackaged), then deploy both charts to
+//                    the QA cluster (qa.oanstaging.com) with oan-qa-kubeconfig and publish to repository/staging.
 //
 //  Tags:  <version of pyproject.toml>-<branch>.<build>, e.g. 0.0.0-develop.2 (= chart version), like oan_a2c.
-//  Credentials: aws-ecr-creds (ECR push), oan-dev-kubeconfig (file; the deployer ServiceAccount, which needs
-//               the namespace in deployNamespaces of oan-helm's cluster-access values), oan-helm-fork-token
-//               (publishing the chart).
+//  Credentials: aws-ecr-creds (ECR push/retag), oan-dev-kubeconfig / oan-qa-kubeconfig (file; the deployer
+//               ServiceAccount, which needs the namespace in deployNamespaces of oan-helm's cluster-access values),
+//               oan-helm-fork-token (publishing the chart).
 // =============================================================================
 pipeline {
     agent any
@@ -53,12 +55,14 @@ pipeline {
                     helm dependency build helm/oan-identitygovernance-service
                     helm lint helm/oan-identitygovernance-service \
                         -f helm/environments/dev/oan-identitygovernance-service.yaml
+                    helm lint helm/oan-identitygovernance-service \
+                        -f helm/environments/staging/oan-identitygovernance-service.yaml
                 '''
             }
         }
 
         stage('Build image') {
-            when { anyOf { branch 'develop'; branch 'staging' } }
+            when { branch 'develop' }
             steps {
                 sh '''
                     DOCKER_BUILDKIT=1 docker build \
@@ -72,7 +76,7 @@ pipeline {
         }
 
         stage('Push image') {
-            when { anyOf { branch 'develop'; branch 'staging' } }
+            when { branch 'develop' }
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
@@ -98,8 +102,9 @@ pipeline {
 
         // The chart with this build's image in its values; the deploy installs this archive and
         // the same archive is published to oan-helm afterwards.
+        // staging: `promote` instead of `package`: develop's chart for this source tree, its image tagged for staging.
         stage('Package chart') {
-            when { branch 'develop' }
+            when { anyOf { branch 'develop'; branch 'staging' } }
             steps {
                 script {
                     env.IMAGE_TAG = env.IMMUTABLE_TAG
@@ -107,7 +112,20 @@ pipeline {
                     env.COMMIT_SUBJECT = sh(returnStdout: true, script: 'git log -1 --pretty=%s').trim()
                     env.IMAGE_REPOSITORY = env.ECR_REPO   // registry is a separate value of the chart
                 }
-                sh 'python3 ci/package_chart.py package'
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-ecr-creds'
+                ]]) {
+                    script {
+                        if (env.BRANCH_NAME == 'staging') {
+                            // The workspace holds the staging branch only; promote needs the develop commits the chart index names.
+                            withCredentials([gitUsernamePassword(credentialsId: scm.userRemoteConfigs[0].credentialsId, gitToolName: 'Default')]) {
+                                sh 'git fetch --quiet --no-tags origin +refs/heads/develop:refs/remotes/origin/develop'
+                            }
+                        }
+                    }
+                    sh "python3 ci/package_chart.py ${env.BRANCH_NAME == 'staging' ? 'promote' : 'package'}"
+                }
                 // The deploy stage runs on the VPN deploy agent, which gets the archive from here.
                 stash name: 'built-chart', includes: 'built-chart/**'
             }
@@ -115,7 +133,10 @@ pipeline {
 
         // The route chart (apisix/k8s) is packaged and published like the app chart, with the version of the build.
         stage('Package gateway chart') {
-            when { branch 'develop' }
+            when {
+                beforeAgent true
+                anyOf { branch 'develop'; branch 'staging' }
+            }
             steps {
                 sh 'python3 ci/package_chart.py gateway-package'
                 stash name: 'built-gateway-chart', includes: 'built-gateway-chart/**'
@@ -151,9 +172,58 @@ pipeline {
             }
         }
 
-        // Adds the archive built by 'Package chart' to repository/develop/ of oan-helm, only after the deploy succeeded.
+        // staging -> Helm release `identitygovernance` on the QA cluster from the promoted archive, then its APISIX routes.
+        stage('staging → QA cluster (helm)') {
+            when { beforeAgent true; branch 'staging' }
+            agent { label 'oan-ci-deploy' }   // VPN agent with helm and kubectl; must reach the QA API
+            options { timeout(time: 20, unit: 'MINUTES') }
+            steps {
+                checkout scm
+                sh 'rm -rf built-chart'
+                unstash 'built-chart'
+                withCredentials([file(credentialsId: 'oan-qa-kubeconfig', variable: 'KUBECONFIG')]) {
+                    sh 'DEPLOY_ENV=staging bash ci/deploy-helm-dev.sh'
+                }
+            }
+        }
+
+        stage('staging → QA cluster (apisix)') {
+            when { beforeAgent true; branch 'staging' }
+            agent { label 'oan-ci-deploy' }
+            options { timeout(time: 15, unit: 'MINUTES') }
+            steps {
+                checkout scm
+                sh 'rm -rf built-gateway-chart'
+                unstash 'built-gateway-chart'
+                withCredentials([file(credentialsId: 'oan-qa-kubeconfig', variable: 'KUBECONFIG')]) {
+                    sh 'GATEWAY_VALUES=helm/environments/staging/oan-identitygovernance-gateway.yaml bash ci/deploy-gateway.sh'
+                }
+            }
+        }
+
+        stage('Verify') {
+            when { beforeAgent true; anyOf { branch 'develop'; branch 'staging' } }
+            agent { label 'oan-ci-deploy' }
+            steps {
+                sh '''
+                    host="identitygovernance-service.development.oanstaging.com"
+                    [ "$BRANCH_NAME" = "staging" ] && host="identitygovernance-service.qa.oanstaging.com"
+                    url="https://$host/ping"
+                    for i in $(seq 1 10); do
+                        code=$(curl -s -o /dev/null -w "%{http_code}" -m 10 "$url" || true)
+                        echo "attempt $i: $url -> $code"
+                        case "$code" in 2??|401|403) exit 0 ;; esac
+                        sleep 6
+                    done
+                    echo "identitygovernance service did not answer at $url"
+                    exit 1
+                '''
+            }
+        }
+
+        // Adds the archive built by 'Package chart' to repository/<channel>/ of oan-helm, only after the deploy succeeded.
         stage('Publish chart') {
-            when { branch 'develop' }
+            when { anyOf { branch 'develop'; branch 'staging' } }
             steps {
                 // UNSTABLE, not failed: the image is already deployed.
                 catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE') {
@@ -165,7 +235,10 @@ pipeline {
         }
 
         stage('Publish gateway chart') {
-            when { branch 'develop' }
+            when {
+                beforeAgent true
+                anyOf { branch 'develop'; branch 'staging' }
+            }
             steps {
                 catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE') {
                     withCredentials([usernamePassword(credentialsId: 'oan-helm-fork-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
