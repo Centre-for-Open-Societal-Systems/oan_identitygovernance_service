@@ -5,6 +5,7 @@ Run by the Jenkins stages "Resolve", "Package chart" and "Publish chart" of ever
     package_chart.py version   prints the chart version, which is also the image tag of the build:
                                <version of pyproject.toml>-develop.<BUILD_NUMBER>, e.g. 0.0.0-develop.2 (develop or staging)
     package_chart.py package   writes built-chart/oan-identitygovernance-service-<version>.tgz
+    package_chart.py promote   staging only: the develop chart of this source tree with its image also tagged <version>-staging.N
     package_chart.py publish   adds that archive to repository/develop/ of oan-helm
     package_chart.py gateway-package   writes built-gateway-chart/oan-identitygovernance-gateway-<version>.tgz, the route
                                chart of apisix/k8s, with the version of the build
@@ -81,6 +82,104 @@ def chart_version(env):
 
 def deploy_env(env):
     return {"develop": "dev", "staging": "staging"}[env["BRANCH_NAME"]]
+
+
+def retag(promote, repository, source_tag, tag):
+    """Add `tag` to the ECR image that has `source_tag`. The manifest is the same, so the image cannot change."""
+    found = promote.ECR.match(repository)
+    if found is None:
+        raise ValueError("%s is not an ECR repository" % repository)
+    base = ["aws", "ecr", "--region", found.group("region")]
+    name = ["--repository-name", found.group("name")]
+    manifest = promote.run(
+        [
+            *base,
+            "batch-get-image",
+            *name,
+            "--image-ids",
+            "imageTag=" + source_tag,
+            "--query",
+            "images[0].imageManifest",
+            "--output",
+            "text",
+        ]
+    ).rstrip("\n")
+    if not manifest or manifest == "None":
+        raise ValueError("%s has no image tagged %s" % (repository, source_tag))
+    result = subprocess.run(
+        [*base, "put-image", *name, "--image-tag", tag, "--image-manifest", manifest],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode and "ImageAlreadyExistsException" not in result.stderr:
+        raise ValueError("%s: could not add tag %s: %s" % (repository, tag, result.stderr.strip()[:300]))
+
+
+def promote_build(env, work):
+    """staging: the develop chart built from this very source tree, its image also tagged with the staging version.
+
+    Nothing is rebuilt: staging only runs what develop built. Needs the aws CLI with ECR access; DRY_RUN=1 tags nothing."""
+    load_generic(work)  # puts oan-helm's scripts/ci on sys.path
+    import package_chart as generic
+    import promote_chart as promote  # oan-helm's, fetched above
+
+    version = chart_version(env)
+    if env["IMAGE_TAG"] != version:
+        raise ValueError("image tag %s is not the chart version %s" % (env["IMAGE_TAG"], version))
+    tree = run(["git", "rev-parse", "HEAD^{tree}"]).strip()
+    source = promote.channel()
+    index = urllib.request.urlopen(source + "index.yaml", timeout=60).read().decode("utf-8")
+
+    def tree_of(commit):
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", commit + "^{tree}"],
+            cwd=str(ROOT),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        return result.stdout.strip() if result.returncode == 0 else None
+
+    entry = promote.built_from_tree(promote.index_entries(index, CHART), tree, tree_of)
+    archive = work / "develop.tgz"
+    promote.download("%s%s-%s.tgz" % (source, CHART, entry["version"]), archive, entry["digest"])
+    with tarfile.open(str(archive)) as bundle:
+        bundle.extractall(str(work))
+    chart = work / CHART
+    ecr_repository = "%s/%s" % (env["IMAGE_REGISTRY"], env["IMAGE_REPOSITORY"])
+    print("%s:%s -> %s" % (ecr_repository, entry["version"], version))
+    if env.get("DRY_RUN") != "1":
+        retag(promote, ecr_repository, entry["version"], version)
+    values = chart / "values.yaml"
+    values.write_text(
+        generic.set_image(values.read_text(encoding="utf-8"), "image", env["IMAGE_REPOSITORY"], version),
+        encoding="utf-8",
+    )
+    metadata = chart / "Chart.yaml"
+    text = re.sub(
+        r"(?m)^\s*oan\.org/(source-commit|source-subject|release-name|release-namespace|values-overlay):.*\n",
+        "",
+        metadata.read_text(encoding="utf-8"),
+    )
+    metadata.write_text(
+        generic.annotate(
+            text,
+            {
+                "oan.org/promoted-from": entry["version"],
+                "oan.org/source-commit": env["SOURCE_COMMIT"],
+                "oan.org/source-subject": env.get("COMMIT_SUBJECT", "")[:200],
+                "oan.org/release-name": RELEASE,
+                "oan.org/release-namespace": RELEASE,
+                "oan.org/values-overlay": "helm/environments/staging/oan-identitygovernance-service.yaml",
+            },
+        ),
+        encoding="utf-8",
+    )
+    shutil.rmtree(str(OUTPUT), ignore_errors=True)
+    OUTPUT.mkdir()
+    run(["helm", "package", str(chart), "--version", version, "--destination", str(OUTPUT)])
+    print("packaged %s-%s.tgz" % (CHART, version))
+    return 0
 
 
 def version_build(env, work):
@@ -199,12 +298,13 @@ def main(argv=None, env=None):
     actions = {
         "version": version_build,
         "package": package_build,
+        "promote": promote_build,
         "publish": publish_build,
         "gateway-package": gateway_package_build,
         "gateway-publish": gateway_publish_build,
     }
     if len(argv) != 1 or argv[0] not in actions:
-        print("usage: package_chart.py version|package|publish|gateway-package|gateway-publish")
+        print("usage: package_chart.py version|package|promote|publish|gateway-package|gateway-publish")
         return 1
     work = Path(tempfile.mkdtemp(prefix="rbac-chart-"))
     try:
