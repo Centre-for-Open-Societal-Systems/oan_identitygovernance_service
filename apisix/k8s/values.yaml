@@ -1,0 +1,14 @@
+# Defaults for the oan-identitygovernance-gateway chart. Per-environment values are in
+# helm/environments/<env>/oan-identitygovernance-gateway.yaml.
+
+ingressClassName: apisix
+
+# The public host of the service; the route matches it.
+host: ""
+
+# The Service of the oan-identitygovernance-service release in this namespace.
+serviceName: identitygovernance-oan-identitygovernance-service
+servicePort: 80
+
+# Largest request body APISIX accepts, in bytes.
+maxBodySize: 1048576

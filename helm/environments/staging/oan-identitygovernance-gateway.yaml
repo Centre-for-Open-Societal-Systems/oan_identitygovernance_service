@@ -1,0 +1,14 @@
+# Values for the oan-identitygovernance-gateway chart (apisix/k8s).
+# Target: the QA RKE2 node (qa.oanstaging.com), the staging environment, namespace `identitygovernance`,
+# installed by the Jenkins stage "staging → QA cluster (apisix)" (ci/deploy-gateway.sh).
+# APISIX and its Ingress Controller run in namespace api6-gateway on the same node. In QA APISIX
+# terminates TLS for every *.qa.oanstaging.com host with one wildcard, so this chart creates no ApisixTls.
+# After the stage ran, `kubectl -n identitygovernance get apisixroute` lists the route.
+
+ingressClassName: apisix
+
+# Must equal global.hostname in oan-identitygovernance-service.yaml (RBAC_PUBLIC_URL, the OIDC redirect URI).
+host: identitygovernance-service.qa.oanstaging.com
+
+serviceName: identitygovernance-oan-identitygovernance-service
+servicePort: 80

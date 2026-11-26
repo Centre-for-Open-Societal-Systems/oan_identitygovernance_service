@@ -1,23 +1,22 @@
-from datetime import datetime
-
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
-
-
-class RealmIn(BaseModel):
-    name: str
+from pydantic import BaseModel, EmailStr, Field
 
 
 class ApplicationIn(BaseModel):
     realm: str
-    mnemonic: str = Field(pattern=r"^[A-Za-z0-9._-]+$")
-    description: str | None = None  # stored on the Keycloak client, not here
-    admin_api_url: str | None = None
+    client_id: str = Field(pattern=r"^[A-Za-z0-9._-]+$")  # the Keycloak clientId, one per service
+    description: str | None = None  # stored on the Keycloak client
+    admin_api_url: str  # the service's admin API, e.g. https://grievance-service.<domain>/v1/admin; the client's root URL
 
 
 class RoleIn(BaseModel):
-    application_id: str
     name: str
-    description: str | None = None  # sent to the service, not stored here
+
+
+class RoleRef(BaseModel):
+    """A role is the Keycloak client role `name` of application `client_id`, in the user's realm."""
+
+    client_id: str
+    name: str
 
 
 class PermissionPair(BaseModel):
@@ -29,10 +28,6 @@ class RolePermissionsIn(BaseModel):
     permissions: list[PermissionPair]
 
 
-class AllowListIn(BaseModel):
-    permissions: list[PermissionPair]
-
-
 class UserIn(BaseModel):
     realm: str
     username: str
@@ -41,7 +36,7 @@ class UserIn(BaseModel):
     last_name: str | None = None
     groups: list[str] = []
     location_codes: list[str] = []
-    role_ids: list[str] = []
+    roles: list[RoleRef] = []
     send_invite: bool = True
 
 
@@ -49,55 +44,38 @@ class BulkUsersIn(BaseModel):
     users: list[UserIn]
 
 
-class RoleAssignIn(BaseModel):
-    role_id: str
+class RoleAssignIn(RoleRef):
+    pass
 
 
 class ApplicationOut(BaseModel):
-    """Registry row plus the live Keycloak client (`enabled` is None when the client no longer exists)."""
+    """The application's Keycloak client, read live."""
 
-    id: str
     realm: str
-    mnemonic: str
+    client_id: str
     admin_api_url: str | None
     description: str | None
-    enabled: bool | None
+    enabled: bool
 
     @classmethod
-    def of(cls, a, client: dict | None):
-        client = client or {}
+    def of(cls, realm: str, client: dict):
         return cls(
-            id=a.id, realm=a.realm, mnemonic=a.mnemonic, admin_api_url=a.admin_api_url,
-            description=client.get("description") or None, enabled=client.get("enabled"),
+            realm=realm, client_id=client["clientId"], admin_api_url=client.get("rootUrl") or None,
+            description=client.get("description") or None, enabled=client.get("enabled", True),
         )
 
 
 class ApplicationCreatedOut(ApplicationOut):
-    client_secret: str
+    client_secret: str | None  # None for a public client
     client_secret_note: str = "Shown once. Not stored."
 
 
 class RoleOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    """A client role of the application's Keycloak client, read live."""
 
-    id: str
-    application_id: str
+    client_id: str
     name: str
-    keycloak_role_id: str | None
-    status: str
-    error: str | None
-
-
-class SyncRunOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    realm: str
-    direction: str
-    started: datetime
-    finished: datetime | None
-    counts: dict | None
-    errors: list | None
+    description: str | None
 
 
 class UserOut(BaseModel):

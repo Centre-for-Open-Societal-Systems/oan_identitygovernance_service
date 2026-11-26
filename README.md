@@ -30,16 +30,26 @@ the staff IAM access-token cookie. Cookie-authenticated writes must send `X-Requ
 
 ## Implemented (design section)
 
-- Realms, applications (3.1: row, Keycloak client, secret returned once, first sync with rollback)
-- Roles (3.2: pending, service admin API, active/failed), permissions with allow-list (3.3)
-- Users create / bulk / enable / disable / grant / revoke (4)
-- First sync from Keycloak with `imported` -> accept (5.1)
-- Audit log on every write
+RBAC keeps no state of its own beyond an audit log. Keycloak and the services are the sources of truth.
+
+- Managed realms: the `RBAC_MANAGED_REALMS` setting.
+- Applications (3.1): one Keycloak client per service, marked with the client attribute `rbac.managed`, its root URL
+  the service's admin API (e.g. `https://grievance-service.<domain>/v1/admin`). Registering creates the client or takes
+  over an existing one, returns its secret once and grants `OAN Administrator` on it to the operator.
+- Roles (3.2): the client's roles, listed live; created and deleted through the service admin API with the operator's
+  token, the service writing the Keycloak client role.
+- Permissions (3.3): read and written live in the service, which decides what may be granted.
+- Users create / bulk / enable / disable / grant / revoke (4), roles named by `{client_id, name}`.
+- Audit log on every write: the only table.
 
 ## Not yet
 
-Scheduled sync, drift report (6), service-to-RBAC role reports (3.4), secret store beyond env refs, Alembic.
+Drift report (6), service-to-RBAC role reports (3.4), Alembic.
 
 ## Deploy
+
+The public host is routed by APISIX (oan_dev): the chart `apisix/k8s` holds the ApisixRoute, values in
+`helm/environments/dev/oan-identitygovernance-gateway.yaml`, installed by `ci/deploy-gateway.sh` (Jenkins stage
+`develop → gateway (apisix)`), packaged and published to oan-helm like the app chart.
 
 Helm chart: `helm/oan-identitygovernance-service`; dev values: `helm/environments/dev/`.

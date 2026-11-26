@@ -1,6 +1,5 @@
 from fastapi import Depends
 from openg2p_fastapi_common.controller import BaseController
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
@@ -8,10 +7,9 @@ from app.auth import OPERATOR, VIEWER, Principal, require
 from app.db import get_session
 from app.envelope import RbacError, ok
 from app.keycloak import keycloak
-from app.models import Application
 from app.schemas import UserOut
 from app.services import users as users_svc
-from app.services.common import get_client
+from app.services.common import check_realm, managed_clients
 
 
 class UsersController(BaseController):
@@ -46,17 +44,16 @@ class UsersController(BaseController):
 
     async def list_users(self, realm: str, search: str | None = None, first: int = 0, max: int = 50, _: Principal = Depends(require(VIEWER, OPERATOR))):
         params = {"first": first, "max": min(max, 200), **({"search": search} if search else {})}
-        reps = (await keycloak.request("GET", f"/{realm}/users", params=params)).json()
+        reps = (await keycloak.request("GET", f"/{check_realm(realm)}/users", params=params)).json()
         return ok([UserOut.of(u) for u in reps])
 
-    async def user_roles(self, user_id: str, realm: str, db: AsyncSession = Depends(get_session), _: Principal = Depends(require(VIEWER, OPERATOR))):
+    async def user_roles(self, user_id: str, realm: str, _: Principal = Depends(require(VIEWER, OPERATOR))):
         """Client roles the user holds in each managed application, read live from Keycloak."""
         out = []
-        for app in await db.scalars(select(Application).where(Application.realm == realm)):
-            client_uuid = (await get_client(app))["id"]
-            held = (await keycloak.request("GET", f"/{realm}/users/{user_id}/role-mappings/clients/{client_uuid}")).json()
+        for client in await managed_clients(check_realm(realm)):
+            held = (await keycloak.request("GET", f"/{realm}/users/{user_id}/role-mappings/clients/{client['id']}")).json()
             if held:
-                out.append({"application": app.mnemonic, "application_id": app.id, "roles": sorted(r["name"] for r in held)})
+                out.append({"client_id": client["clientId"], "roles": sorted(r["name"] for r in held)})
         return ok(out)
 
     async def disable(self, user_id: str, realm: str, db: AsyncSession = Depends(get_session), p: Principal = Depends(require(OPERATOR))):
@@ -66,7 +63,7 @@ class UsersController(BaseController):
         return ok(await users_svc.set_status(db, p.username, realm, user_id, True))
 
     async def grant(self, user_id: str, realm: str, body: schemas.RoleAssignIn, db: AsyncSession = Depends(get_session), p: Principal = Depends(require(OPERATOR))):
-        return ok(await users_svc.assign_role(db, p.username, realm, user_id, body.role_id, True))
+        return ok(await users_svc.assign_role(db, p.username, realm, user_id, body.model_dump(), True))
 
     async def revoke(self, user_id: str, realm: str, body: schemas.RoleAssignIn, db: AsyncSession = Depends(get_session), p: Principal = Depends(require(OPERATOR))):
-        return ok(await users_svc.assign_role(db, p.username, realm, user_id, body.role_id, False))
+        return ok(await users_svc.assign_role(db, p.username, realm, user_id, body.model_dump(), False))

@@ -1,30 +1,39 @@
 """Lookups and the audit write shared by several controllers and services."""
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import Settings
 from app.envelope import RbacError
 from app.keycloak import keycloak
-from app.models import Application, AuditLog, Role
+from app.models import AuditLog
+
+_config = Settings.get_config(strict=False)
+
+# Client attribute marking a Keycloak client as an application RBAC manages. Its root URL is the service's admin API.
+MANAGED_ATTRIBUTE = "rbac.managed"
 
 
-async def get_app(db: AsyncSession, app_id: str) -> Application:
-    app = await db.get(Application, app_id)
-    if not app:
-        raise RbacError("APP_NOT_FOUND", "Application not found", 404)
-    return app
+def check_realm(realm: str) -> str:
+    if realm not in _config.managed_realms:
+        raise RbacError("REALM_NOT_MANAGED", f"Realm {realm} is not managed by RBAC", 404)
+    return realm
 
 
-async def get_role(db: AsyncSession, role_id: str) -> Role:
-    role = await db.get(Role, role_id)
-    if not role:
-        raise RbacError("ROLE_NOT_FOUND", "Role not found", 404)
-    return role
+def is_managed(client: dict) -> bool:
+    return (client.get("attributes") or {}).get(MANAGED_ATTRIBUTE) == "true"
 
 
-async def get_client(app: Application) -> dict:
-    """The application's Keycloak client (uuid, enabled, description), read live."""
-    client = await keycloak.find_client(app.realm, app.mnemonic)
-    if not client:
-        raise RbacError("CLIENT_MISSING", f"Keycloak client {app.mnemonic} not found in realm {app.realm}", 409)
+async def managed_clients(realm: str) -> list[dict]:
+    """The realm's clients marked as applications, read live."""
+    clients = (await keycloak.request("GET", f"/{realm}/clients", params={"max": 1000})).json()
+    return [c for c in clients if is_managed(c)]
+
+
+async def get_app(realm: str, client_id: str) -> dict:
+    """The application's Keycloak client (uuid, enabled, description, rootUrl = admin API), read live."""
+    check_realm(realm)
+    client = await keycloak.find_client(realm, client_id)
+    if not client or not is_managed(client):
+        raise RbacError("APP_NOT_FOUND", f"Application {client_id} not found in realm {realm}", 404)
     return client
 
 
