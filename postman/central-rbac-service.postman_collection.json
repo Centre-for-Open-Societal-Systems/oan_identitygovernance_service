@@ -47,7 +47,9 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.response.to.have.status(200));",
-                  "pm.environment.set('rbac_token', pm.response.json().access_token);"
+                  "pm.environment.set('rbac_token', pm.response.json().access_token);",
+                  "pm.environment.set('g_role_name', 'Grievance RBAC Test ' + Date.now());",
+                  "pm.environment.set('g_role_path', encodeURIComponent(pm.environment.get('g_role_name')));"
                 ]
               }
             }
@@ -574,7 +576,7 @@
             "url": "{{rbac_base_url}}/applications/{{kc_realm}}/{{grievance_client_id}}/roles/create",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Grievance RBAC Test\"\n}"
+              "raw": "{\n  \"name\": \"{{g_role_name}}\"\n}"
             }
           },
           "event": [
@@ -586,7 +588,7 @@
                   "pm.test('status 200', () => pm.response.to.have.status(200));",
                   "const j = pm.response.json();",
                   "pm.test('envelope ok', () => pm.expect(j.response_header.status).to.eql('SUCCESS'));",
-                  "pm.test('created', () => pm.expect(j.response_body.name).to.eql('Grievance RBAC Test'));"
+                  "pm.test('created', () => pm.expect(j.response_body.name).to.eql(pm.environment.get('g_role_name')));"
                 ]
               }
             }
@@ -613,7 +615,7 @@
                   "pm.test('status 200', () => pm.response.to.have.status(200));",
                   "const j = pm.response.json();",
                   "pm.test('envelope ok', () => pm.expect(j.response_header.status).to.eql('SUCCESS'));",
-                  "pm.test('listed', () => pm.expect(j.response_body.map(x => x.name)).to.include('Grievance RBAC Test'));"
+                  "pm.test('listed', () => pm.expect(j.response_body.map(x => x.name)).to.include(pm.environment.get('g_role_name')));"
                 ]
               }
             }
@@ -633,7 +635,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{rbac_base_url}}/applications/{{kc_realm}}/{{grievance_client_id}}/roles/Grievance%20RBAC%20Test/permissions",
+            "url": "{{rbac_base_url}}/applications/{{kc_realm}}/{{grievance_client_id}}/roles/{{g_role_path}}/permissions",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"permissions\": [\n    {\n      \"resource\": \"Grievance\",\n      \"action\": \"read\"\n    }\n  ]\n}"
@@ -663,7 +665,7 @@
                 "value": "Bearer {{rbac_token}}"
               }
             ],
-            "url": "{{rbac_base_url}}/applications/{{kc_realm}}/{{grievance_client_id}}/roles/Grievance%20RBAC%20Test/permissions"
+            "url": "{{rbac_base_url}}/applications/{{kc_realm}}/{{grievance_client_id}}/roles/{{g_role_path}}/permissions"
           },
           "event": [
             {
@@ -732,7 +734,7 @@
             "url": "{{rbac_base_url}}/users/{{g_user_id}}/roles/grant?realm={{kc_realm}}",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"client_id\": \"{{grievance_client_id}}\",\n  \"name\": \"Grievance RBAC Test\"\n}"
+              "raw": "{\n  \"client_id\": \"{{grievance_client_id}}\",\n  \"name\": \"{{g_role_name}}\"\n}"
             }
           },
           "event": [
@@ -772,7 +774,7 @@
                   "pm.test('envelope ok', () => pm.expect(j.response_header.status).to.eql('SUCCESS'));",
                   "const r = JSON.stringify(j.response_body);",
                   "pm.test('Grievance Officer', () => pm.expect(r).to.include('Grievance Officer'));",
-                  "pm.test('Grievance RBAC Test', () => pm.expect(r).to.include('Grievance RBAC Test'));"
+                  "pm.test('role held', () => pm.expect(r).to.include(pm.environment.get('g_role_name')));"
                 ]
               }
             }
@@ -788,7 +790,7 @@
                 "value": "Bearer {{rbac_token}}"
               }
             ],
-            "url": "{{rbac_base_url}}/applications/{{kc_realm}}/{{grievance_client_id}}/roles/Grievance%20RBAC%20Test/delete"
+            "url": "{{rbac_base_url}}/applications/{{kc_realm}}/{{grievance_client_id}}/roles/{{g_role_path}}/delete"
           },
           "event": [
             {
@@ -825,7 +827,7 @@
                   "pm.test('status 200', () => pm.response.to.have.status(200));",
                   "const j = pm.response.json();",
                   "pm.test('envelope ok', () => pm.expect(j.response_header.status).to.eql('SUCCESS'));",
-                  "pm.test('not listed', () => pm.expect(j.response_body.map(x => x.name)).to.not.include('Grievance RBAC Test'));"
+                  "pm.test('not listed', () => pm.expect(j.response_body.map(x => x.name)).to.not.include(pm.environment.get('g_role_name')));"
                 ]
               }
             }
@@ -1024,7 +1026,7 @@
                 "value": "Bearer {{rbac_token}}"
               }
             ],
-            "url": "{{grievance_admin_url}}/roles/Grievance%20RBAC%20Test"
+            "url": "{{grievance_admin_url}}/roles/{{g_role_path}}"
           },
           "event": [
             {
@@ -1074,7 +1076,7 @@
                 "value": "Bearer {{kc_token}}"
               }
             ],
-            "url": "{{kc_base_url}}/admin/realms/{{kc_realm}}/clients/{{g_client_uuid}}/roles/Grievance%20RBAC%20Test"
+            "url": "{{kc_base_url}}/admin/realms/{{kc_realm}}/clients/{{g_client_uuid}}/roles/{{g_role_path}}"
           },
           "event": [
             {
