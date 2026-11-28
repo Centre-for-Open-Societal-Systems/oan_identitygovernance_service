@@ -13,8 +13,9 @@ class ServiceAdapter:
     service prefix; a permission is a (doctype, right) pair, e.g. ("Farmer", "read"). Responses carry the payload in `data`.
 
     POST  /roles {role}                                  create
+    DELETE /permissions {role, doctype, permlevel}       remove one rule; a role with rules cannot be deleted
     DELETE /roles/{role}                                 delete
-    GET   /permissions?role=                             rows with a 0/1 per right
+    GET  /permissions?role=                             rows with a 0/1 per right
     PUT   /permissions {role, doctype, permissions: {right: bool}}
 
     Called with the operator's own token: the service sees the operator, and its doctype permissions decide.
@@ -47,6 +48,11 @@ class ServiceAdapter:
         await self.request("POST", "/roles", json={"role": name})
 
     async def delete_role(self, name: str) -> None:
+        """The service refuses to delete a role its permission rules still link to, so remove the rules first."""
+        rows = (await self.request("GET", "/permissions", params={"role": name})).get("data") or []
+        for r in rows:
+            if not r.get("if_owner"):
+                await self.request("DELETE", "/permissions", params={"role": name, "doctype": r["doctype"], "permlevel": r.get("permlevel") or 0})
         await self.request("DELETE", f"/roles/{name}")
 
     async def get_permissions(self, name: str) -> list[dict]:
